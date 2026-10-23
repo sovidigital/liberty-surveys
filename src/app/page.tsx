@@ -1,0 +1,142 @@
+import Link from 'next/link';
+import { SignupForm } from '@/components/SignupForm';
+
+export default function HomePage() {
+  return (
+    <main className="min-h-screen">
+      {/* Hero Section */}
+      <section className="bg-gradient-to-b from-blue-900 to-blue-800 text-white">
+        <div className="max-w-6xl mx-auto px-4 py-20 sm:px-6 lg:px-8">
+          <nav className="flex justify-between items-center mb-16">
+            <h1 className="text-2xl font-bold">Liberty Surveys</h1>
+            <div className="space-x-6">
+              <Link href="/polls" className="text-blue-200 hover:text-white transition-colors">
+                Results
+              </Link>
+              <Link href="/archive" className="text-blue-200 hover:text-white transition-colors">
+                Archive
+              </Link>
+            </div>
+          </nav>
+
+          <div className="max-w-3xl mx-auto text-center">
+            <h2 className="text-4xl sm:text-5xl font-bold mb-6">
+              Your Voice Matters
+            </h2>
+            <p className="text-xl text-blue-100 mb-10">
+              Join thousands of Americans sharing their views on the issues that matter most.
+              Receive a daily poll on current events and see how your opinions compare.
+            </p>
+            
+            <div className="flex justify-center">
+              <SignupForm />
+            </div>
+
+            <p className="mt-4 text-sm text-blue-200">
+              One email per day. Unsubscribe anytime.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      {/* How It Works */}
+      <section className="py-20 bg-white">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
+          <h3 className="text-3xl font-bold text-center text-gray-900 mb-12">
+            How It Works
+          </h3>
+          
+          <div className="grid md:grid-cols-3 gap-8">
+            <div className="text-center p-6">
+              <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <span className="text-2xl">📧</span>
+              </div>
+              <h4 className="text-xl font-semibold text-gray-900 mb-2">
+                Daily Email
+              </h4>
+              <p className="text-gray-600">
+                Receive a fresh political poll every morning covering the latest issues and debates.
+              </p>
+            </div>
+
+            <div className="text-center p-6">
+              <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <span className="text-2xl">🗳️</span>
+              </div>
+              <h4 className="text-xl font-semibold text-gray-900 mb-2">
+                One-Click Vote
+              </h4>
+              <p className="text-gray-600">
+                Cast your vote instantly with a single click, directly from your inbox.
+              </p>
+            </div>
+
+            <div className="text-center p-6">
+              <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <span className="text-2xl">📊</span>
+              </div>
+              <h4 className="text-xl font-semibold text-gray-900 mb-2">
+                See Results
+              </h4>
+              <p className="text-gray-600">
+                View real-time results and see how others responded to the same questions.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Latest Poll Preview */}
+      <section className="py-20 bg-gray-100">
+        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+          <h3 className="text-3xl font-bold text-gray-900 mb-6">
+            See What We&apos;re Asking
+          </h3>
+          <p className="text-gray-600 mb-8">
+            Browse our archive of past polls and see results from the community.
+          </p>
+          <div className="space-x-4">
+            <Link
+              href="/polls"
+              className="inline-block px-6 py-3 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 transition-colors"
+            >
+              View Current Poll
+            </Link>
+            <Link
+              href="/archive"
+              className="inline-block px-6 py-3 bg-white text-blue-600 font-semibold rounded-lg border border-blue-600 hover:bg-blue-50 transition-colors"
+            >
+              Browse Archive
+            </Link>
+          </div>
+        </div>
+      </section>
+
+      {/* Footer */}
+      <footer className="bg-gray-900 text-gray-400 py-12">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex flex-col md:flex-row justify-between items-center">
+            <div className="mb-6 md:mb-0">
+              <h4 className="text-white text-xl font-bold mb-2">Liberty Surveys</h4>
+              <p className="text-sm">Making your voice heard, one poll at a time.</p>
+            </div>
+            <div className="flex space-x-8">
+              <Link href="/polls" className="hover:text-white transition-colors">
+                Results
+              </Link>
+              <Link href="/archive" className="hover:text-white transition-colors">
+                Archive
+              </Link>
+              <Link href="/privacy" className="hover:text-white transition-colors">
+                Privacy
+              </Link>
+            </div>
+          </div>
+          <div className="mt-8 pt-8 border-t border-gray-800 text-center text-sm">
+            © {new Date().getFullYear()} Liberty Surveys. All rights reserved.
+          </div>
+        </div>
+      </footer>
+    </main>
+  );
+}
