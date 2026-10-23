@@ -95,7 +95,7 @@ export default function CreatePollPage() {
           <div className="mb-6">
             <Link
               href="/admin/polls"
-              className="text-blue-600 hover:text-blue-800 text-sm"
+              className="text-[#0066b3] hover:text-[#004d8a] text-sm"
             >
           ← Back to Polls
         </Link>
@@ -119,7 +119,7 @@ export default function CreatePollPage() {
             value={question}
             onChange={(e) => setQuestion(e.target.value)}
             rows={3}
-            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#0066b3] focus:border-transparent resize-none"
             placeholder="Enter your poll question..."
             disabled={loading}
           />
@@ -136,7 +136,7 @@ export default function CreatePollPage() {
                   type="text"
                   value={option.text}
                   onChange={(e) => updateOption(option.id, e.target.value)}
-                  className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#0066b3] focus:border-transparent"
                   placeholder={`Option ${index + 1}`}
                   disabled={loading}
                 />
@@ -157,7 +157,7 @@ export default function CreatePollPage() {
             <button
               type="button"
               onClick={addOption}
-              className="mt-3 text-blue-600 hover:text-blue-800 text-sm font-medium"
+              className="mt-3 text-[#0066b3] hover:text-[#004d8a] text-sm font-medium"
               disabled={loading}
             >
               + Add Another Option
@@ -207,7 +207,7 @@ export default function CreatePollPage() {
               id="scheduledFor"
               value={scheduledFor}
               onChange={(e) => setScheduledFor(e.target.value)}
-              className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#0066b3] focus:border-transparent"
               disabled={loading}
             />
           </div>
@@ -217,7 +217,7 @@ export default function CreatePollPage() {
           <button
             type="submit"
             disabled={loading}
-            className="px-6 py-3 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="px-6 py-3 bg-[#e31c23] text-white font-semibold rounded-lg hover:bg-[#c41920] focus:outline-none focus:ring-2 focus:ring-[#e31c23] focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             {loading ? 'Creating...' : 'Create Poll'}
           </button>

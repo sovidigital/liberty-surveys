@@ -102,7 +102,7 @@ export default async function EditPollPage({ params }: Props) {
           <div className="mb-6">
             <Link
               href="/admin/polls"
-              className="text-blue-600 hover:text-blue-800 text-sm"
+              className="text-[#0066b3] hover:text-[#004d8a] text-sm"
             >
               ← Back to Polls
             </Link>
@@ -156,7 +156,7 @@ export default async function EditPollPage({ params }: Props) {
                 </div>
                 <div className="h-6 bg-gray-100 rounded-full overflow-hidden">
                   <div
-                    className="h-full bg-blue-500 rounded-full transition-all duration-300"
+                    className="h-full bg-[#0066b3] rounded-full transition-all duration-300"
                     style={{ width: `${percentage}%` }}
                   />
                 </div>

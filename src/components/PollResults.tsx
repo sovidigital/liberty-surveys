@@ -25,12 +25,12 @@ export function PollResults({
   };
 
   const barColors = [
-    'bg-blue-500',
-    'bg-green-500',
-    'bg-yellow-500',
-    'bg-purple-500',
-    'bg-pink-500',
-    'bg-orange-500',
+    'bg-[#0066b3]',
+    'bg-[#e31c23]',
+    'bg-[#1a1a1a]',
+    'bg-[#0066b3]/70',
+    'bg-[#e31c23]/70',
+    'bg-[#1a1a1a]/70',
   ];
 
   return (
@@ -65,7 +65,7 @@ export function PollResults({
         <span>Total votes: {totalVotes.toLocaleString()}</span>
         <span className={`px-3 py-1 rounded-full text-xs font-medium ${
           status === 'active' 
-            ? 'bg-green-100 text-green-800' 
+            ? 'bg-[#0066b3]/10 text-[#0066b3]' 
             : 'bg-gray-100 text-gray-800'
         }`}>
           {status === 'active' ? 'Voting Open' : 'Voting Closed'}

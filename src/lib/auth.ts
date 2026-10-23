@@ -10,6 +10,11 @@ const JWT_SECRET = new TextEncoder().encode(
 const SESSION_COOKIE_NAME = 'liberty_admin_session';
 const SESSION_DURATION = 24 * 60 * 60 * 1000; // 24 hours
 
+const MOCK_MODE = process.env.USE_MOCK_DB === 'true';
+const MOCK_ADMIN_EMAIL = 'admin@example.com';
+const MOCK_ADMIN_PASSWORD = 'admin123';
+const MOCK_ADMIN_ID = 'mock-admin-001';
+
 interface SessionPayload extends JWTPayload {
   userId: string;
   email: string;
@@ -73,10 +78,24 @@ export async function authenticateAdmin(
   email: string,
   password: string
 ): Promise<{ success: boolean; userId?: string; error?: string }> {
+  const normalizedEmail = email.toLowerCase();
+
+  // In mock mode, ONLY allow the hardcoded test credentials
+  // This is intentionally separate from production auth
+  if (MOCK_MODE) {
+    if (normalizedEmail === MOCK_ADMIN_EMAIL && password === MOCK_ADMIN_PASSWORD) {
+      console.log('[MOCK AUTH] Admin authenticated with test credentials');
+      return { success: true, userId: MOCK_ADMIN_ID };
+    }
+    return { success: false, error: 'Invalid email or password' };
+  }
+
+  // Production mode: authenticate against the database
+  // Requires ADMIN_EMAIL and password to be configured properly in the database
   try {
     const result = await query<AdminUser>(
       'SELECT id, email, password_hash FROM admin_users WHERE email = $1',
-      [email.toLowerCase()]
+      [normalizedEmail]
     );
 
     if (result.rows.length === 0) {
@@ -105,4 +124,8 @@ export async function requireAuth(): Promise<SessionPayload> {
   }
 
   return session;
+}
+
+export function isMockMode(): boolean {
+  return MOCK_MODE;
 }

@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import Image from 'next/image';
 import { notFound } from 'next/navigation';
 import { query } from '@/lib/db';
 import { PollResults } from '@/components/PollResults';
@@ -76,17 +77,24 @@ export default async function PollPage({ params, searchParams }: Props) {
 
   return (
     <main className="min-h-screen bg-gray-50">
-      <nav className="bg-white shadow-sm">
+      <nav className="bg-[#1a1a1a] shadow-sm">
         <div className="max-w-6xl mx-auto px-4 py-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center">
-            <Link href="/" className="text-2xl font-bold text-gray-900">
-              Liberty Surveys
+            <Link href="/">
+              <Image
+                src="/logo.png"
+                alt="Liberty Surveys"
+                width={160}
+                height={45}
+                className="h-10 w-auto"
+                priority
+              />
             </Link>
             <div className="space-x-6">
-              <Link href="/polls" className="text-blue-600 font-medium">
+              <Link href="/polls" className="text-[#e31c23] font-medium">
                 Results
               </Link>
-              <Link href="/archive" className="text-gray-600 hover:text-gray-900">
+              <Link href="/archive" className="text-gray-300 hover:text-white">
                 Archive
               </Link>
             </div>
@@ -118,7 +126,7 @@ export default async function PollPage({ params, searchParams }: Props) {
         <div className="mb-6">
           <Link
             href="/archive"
-            className="text-blue-600 hover:text-blue-800 text-sm"
+            className="text-[#0066b3] hover:text-[#004d8a] text-sm"
           >
             ← Back to Archive
           </Link>
@@ -140,13 +148,13 @@ export default async function PollPage({ params, searchParams }: Props) {
         <div className="mt-8 flex justify-between items-center">
           <Link
             href="/archive"
-            className="text-blue-600 hover:text-blue-800 font-medium"
+            className="text-[#0066b3] hover:text-[#004d8a] font-medium"
           >
             ← Browse all polls
           </Link>
           <Link
             href="/polls"
-            className="text-blue-600 hover:text-blue-800 font-medium"
+            className="text-[#0066b3] hover:text-[#004d8a] font-medium"
           >
             View current poll →
           </Link>

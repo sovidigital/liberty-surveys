@@ -1,8 +1,9 @@
 'use client';
 
-import { useState, FormEvent } from 'react';
+import { useState, useEffect, FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import Image from 'next/image';
 
 export default function AdminLoginPage() {
   const router = useRouter();
@@ -10,6 +11,14 @@ export default function AdminLoginPage() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [isMockMode, setIsMockMode] = useState(false);
+
+  useEffect(() => {
+    fetch('/api/admin/mock-status')
+      .then(res => res.json())
+      .then(data => setIsMockMode(data.isMockMode))
+      .catch(() => setIsMockMode(false));
+  }, []);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -39,13 +48,20 @@ export default function AdminLoginPage() {
   }
 
   return (
-    <main className="min-h-screen bg-gray-100 flex items-center justify-center px-4">
+    <main className="min-h-screen bg-[#1a1a1a] flex items-center justify-center px-4">
       <div className="max-w-md w-full">
         <div className="text-center mb-8">
-          <Link href="/" className="text-2xl font-bold text-gray-900">
-            Liberty Surveys
+          <Link href="/" className="inline-block">
+            <Image
+              src="/logo.png"
+              alt="Liberty Surveys"
+              width={180}
+              height={50}
+              className="h-12 w-auto mx-auto"
+              priority
+            />
           </Link>
-          <h1 className="mt-4 text-xl text-gray-600">Admin Login</h1>
+          <h1 className="mt-4 text-xl text-gray-300">Admin Login</h1>
         </div>
 
         <form onSubmit={handleSubmit} className="bg-white rounded-lg shadow-md p-8">
@@ -64,7 +80,7 @@ export default function AdminLoginPage() {
               id="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#0066b3] focus:border-transparent"
               required
               disabled={loading}
             />
@@ -79,7 +95,7 @@ export default function AdminLoginPage() {
               id="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#0066b3] focus:border-transparent"
               required
               disabled={loading}
             />
@@ -88,20 +104,21 @@ export default function AdminLoginPage() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full py-3 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="w-full py-3 bg-[#e31c23] text-white font-semibold rounded-lg hover:bg-[#c41920] focus:outline-none focus:ring-2 focus:ring-[#e31c23] focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             {loading ? 'Signing in...' : 'Sign In'}
           </button>
 
-          <div className="mt-4 p-3 bg-gray-50 rounded-lg text-sm text-gray-600">
-            <strong>Development credentials:</strong><br />
-            Email: admin@example.com<br />
-            Password: admin123
-          </div>
+          {isMockMode && (
+            <div className="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg text-sm text-yellow-800">
+              <strong>Mock Mode Active</strong><br />
+              Test credentials: admin@example.com / admin123
+            </div>
+          )}
         </form>
 
         <div className="mt-6 text-center">
-          <Link href="/" className="text-gray-500 hover:text-gray-700 text-sm">
+          <Link href="/" className="text-gray-400 hover:text-gray-200 text-sm">
             ← Back to site
           </Link>
         </div>

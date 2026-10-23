@@ -98,7 +98,7 @@ export default async function AdminPollsPage() {
             <h1 className="text-3xl font-bold text-gray-900">Polls</h1>
         <Link
           href="/admin/polls/new"
-          className="px-4 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors"
+          className="px-4 py-2 bg-[#e31c23] text-white font-medium rounded-lg hover:bg-[#c41920] transition-colors"
         >
           + Create Poll
         </Link>
@@ -155,7 +155,7 @@ export default async function AdminPollsPage() {
                     <div className="flex space-x-3">
                       <Link
                         href={`/admin/polls/${poll.id}`}
-                        className="text-blue-600 hover:text-blue-800"
+                        className="text-[#0066b3] hover:text-[#004d8a]"
                       >
                         Edit
                       </Link>
@@ -180,7 +180,7 @@ export default async function AdminPollsPage() {
           <p className="text-gray-600 mb-6">Create your first poll to get started.</p>
           <Link
             href="/admin/polls/new"
-            className="inline-block px-6 py-3 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 transition-colors"
+            className="inline-block px-6 py-3 bg-[#e31c23] text-white font-semibold rounded-lg hover:bg-[#c41920] transition-colors"
           >
             Create First Poll
           </Link>

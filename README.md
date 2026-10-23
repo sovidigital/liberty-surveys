@@ -1,11 +1,11 @@
 # Liberty Surveys
 
-A daily political polling platform that sends subscribers polls via email and displays results publicly.
+A daily political polling platform at **libertysurveys.com** that sends subscribers polls via email at 7:00 AM ET daily and displays results publicly.
 
 ## Features
 
 - **Email Subscription**: Double opt-in subscription flow
-- **Daily Polls**: Scheduled polls delivered via email
+- **Daily Polls**: Scheduled polls delivered at 7:00 AM ET every day
 - **One-Click Voting**: Tamper-resistant signed links for frictionless voting
 - **Results Display**: Real-time vote tallies and percentages
 - **Poll Archive**: Browse historical polls and results
@@ -14,10 +14,19 @@ A daily political polling platform that sends subscribers polls via email and di
 ## Tech Stack
 
 - **Frontend/Backend**: Next.js 16 (App Router, TypeScript)
-- **Database**: Amazon Aurora DSQL (PostgreSQL-compatible)
+- **Database**: Amazon Aurora DSQL (PostgreSQL-compatible, us-east-1)
 - **Email**: Customer.io (Track API, Transactional API, Broadcasts)
-- **Hosting**: AWS Amplify (recommended)
+- **Hosting**: AWS Amplify (us-east-1)
 - **Styling**: Tailwind CSS
+
+## Brand Colors
+
+| Color | Hex | Usage |
+|-------|-----|-------|
+| Charcoal | `#1a1a1a` | Primary text, headers, nav |
+| Red | `#e31c23` | Accent, CTAs, buttons |
+| Blue | `#0066b3` | Links, secondary accents |
+| White | `#ffffff` | Backgrounds |
 
 ## Quick Start
 
@@ -57,7 +66,9 @@ A daily political polling platform that sends subscribers polls via email and di
 4. **Open the app**: http://localhost:3000
 
 5. **Access admin panel**: http://localhost:3000/admin/login
-   - Default credentials: `admin@example.com` / `admin123`
+   - **Mock mode only**: Test credentials `admin@example.com` / `admin123`
+   - These credentials only work when `USE_MOCK_DB=true`
+   - **Production**: Requires database-configured admin users
 
 ### Database Setup
 
@@ -72,16 +83,27 @@ If using a real database:
 
 ### Customer.io Setup
 
-1. Create a Customer.io account at https://customer.io
-2. Get API credentials from Settings > API & Webhook Credentials
-3. Set in `.env.local`:
-   ```
-   CUSTOMERIO_SITE_ID=your_site_id
-   CUSTOMERIO_API_KEY=your_api_key
-   CUSTOMERIO_APP_API_KEY=app_your_api_key
-   ```
-4. Create a transactional message for confirmation emails
-5. Create an API-triggered broadcast for daily polls
+Create a new workspace named "Liberty Surveys" in the **US region**:
+
+1. **Create workspace** at https://customer.io (select US region)
+2. **Configure sending domain**:
+   - Add `libertysurveys.com` as sending domain
+   - Set up DNS records (DKIM, SPF, Return-Path)
+   - Sender: "Liberty Surveys" `<polls@libertysurveys.com>`
+3. **Generate API credentials** (Settings > API & Webhook Credentials):
+   - Copy Site ID → `CUSTOMERIO_SITE_ID`
+   - Copy API Key → `CUSTOMERIO_API_KEY`
+   - Create App API Key → `CUSTOMERIO_APP_API_KEY`
+   - Note Environment ID → `CUSTOMERIO_ENVIRONMENT_ID`
+4. **Create transactional message** for confirmation emails:
+   - Include `{{ trigger.confirm_url }}` for the confirmation link
+   - Note message ID → `CUSTOMERIO_CONFIRM_MESSAGE_ID`
+5. **Create API-triggered broadcast** for daily polls:
+   - Audience: subscribers where `subscription_status = active`
+   - Template uses `trigger.poll_question` and `trigger.options` array
+   - Note campaign ID → `CUSTOMERIO_BROADCAST_CAMPAIGN_ID`
+
+See [PLAN.md](./PLAN.md) for detailed template variables and setup instructions.
 
 ## Project Structure
 

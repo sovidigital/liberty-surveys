@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import Image from 'next/image';
 import { query } from '@/lib/db';
 import { PollCard } from '@/components/PollCard';
 import { Poll, PollOption } from '@/types';
@@ -81,14 +82,20 @@ export default async function ArchivePage() {
       <nav className="bg-white shadow-sm">
         <div className="max-w-6xl mx-auto px-4 py-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center">
-            <Link href="/" className="text-2xl font-bold text-gray-900">
-              Liberty Surveys
+            <Link href="/">
+              <Image
+                src="/logo.png"
+                alt="Liberty Surveys"
+                width={160}
+                height={48}
+                className="h-10 w-auto"
+              />
             </Link>
             <div className="space-x-6">
-              <Link href="/polls" className="text-gray-600 hover:text-gray-900">
+              <Link href="/polls" className="text-gray-600 hover:text-[#1a1a1a]">
                 Results
               </Link>
-              <Link href="/archive" className="text-blue-600 font-medium">
+              <Link href="/archive" className="text-[#e31c23] font-medium">
                 Archive
               </Link>
             </div>
@@ -121,7 +128,7 @@ export default async function ArchivePage() {
             </p>
             <Link
               href="/"
-              className="text-blue-600 hover:text-blue-800 font-medium"
+              className="text-[#e31c23] hover:text-[#c41920] font-medium"
             >
               Subscribe to get notified →
             </Link>

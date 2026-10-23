@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import Image from 'next/image';
 import { usePathname, useRouter } from 'next/navigation';
 
 export function AdminNav() {
@@ -23,12 +24,19 @@ export function AdminNav() {
   ];
 
   return (
-    <nav className="bg-gray-900 text-white">
+    <nav className="bg-[#1a1a1a] text-white">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16">
           <div className="flex items-center space-x-8">
-            <Link href="/admin" className="text-xl font-bold">
-              Liberty Surveys Admin
+            <Link href="/admin" className="flex items-center space-x-3">
+              <Image
+                src="/logo.png"
+                alt="Liberty Surveys"
+                width={140}
+                height={40}
+                className="h-8 w-auto"
+              />
+              <span className="text-sm font-medium text-gray-400">Admin</span>
             </Link>
             <div className="hidden md:flex space-x-4">
               {navItems.map((item) => (
@@ -37,8 +45,8 @@ export function AdminNav() {
                   href={item.href}
                   className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
                     pathname === item.href
-                      ? 'bg-gray-700 text-white'
-                      : 'text-gray-300 hover:bg-gray-700 hover:text-white'
+                      ? 'bg-[#0066b3] text-white'
+                      : 'text-gray-300 hover:bg-[#0066b3]/80 hover:text-white'
                   }`}
                 >
                   {item.label}
@@ -56,7 +64,7 @@ export function AdminNav() {
             </Link>
             <button
               onClick={handleLogout}
-              className="px-4 py-2 text-sm font-medium text-gray-300 hover:text-white hover:bg-gray-700 rounded-md transition-colors"
+              className="px-4 py-2 text-sm font-medium text-gray-300 hover:text-white hover:bg-[#e31c23]/80 rounded-md transition-colors"
             >
               Logout
             </button>

@@ -1,14 +1,24 @@
 import Link from 'next/link';
+import Image from 'next/image';
 import { SignupForm } from '@/components/SignupForm';
 
 export default function HomePage() {
   return (
     <main className="min-h-screen">
-      {/* Hero Section */}
-      <section className="bg-gradient-to-b from-blue-900 to-blue-800 text-white">
+      {/* Hero Section - Brand colors: charcoal/blue gradient */}
+      <section className="bg-gradient-to-b from-[#1a1a1a] to-[#0066b3] text-white">
         <div className="max-w-6xl mx-auto px-4 py-20 sm:px-6 lg:px-8">
           <nav className="flex justify-between items-center mb-16">
-            <h1 className="text-2xl font-bold">Liberty Surveys</h1>
+            <Link href="/" className="flex items-center">
+              <Image
+                src="/logo.png"
+                alt="Liberty Surveys"
+                width={200}
+                height={60}
+                className="h-12 w-auto"
+                priority
+              />
+            </Link>
             <div className="space-x-6">
               <Link href="/polls" className="text-blue-200 hover:text-white transition-colors">
                 Results
@@ -42,16 +52,16 @@ export default function HomePage() {
       {/* How It Works */}
       <section className="py-20 bg-white">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
-          <h3 className="text-3xl font-bold text-center text-gray-900 mb-12">
+          <h3 className="text-3xl font-bold text-center text-[#1a1a1a] mb-12">
             How It Works
           </h3>
           
           <div className="grid md:grid-cols-3 gap-8">
             <div className="text-center p-6">
-              <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <div className="w-16 h-16 bg-[#0066b3]/10 rounded-full flex items-center justify-center mx-auto mb-4">
                 <span className="text-2xl">📧</span>
               </div>
-              <h4 className="text-xl font-semibold text-gray-900 mb-2">
+              <h4 className="text-xl font-semibold text-[#1a1a1a] mb-2">
                 Daily Email
               </h4>
               <p className="text-gray-600">
@@ -60,10 +70,10 @@ export default function HomePage() {
             </div>
 
             <div className="text-center p-6">
-              <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <div className="w-16 h-16 bg-[#e31c23]/10 rounded-full flex items-center justify-center mx-auto mb-4">
                 <span className="text-2xl">🗳️</span>
               </div>
-              <h4 className="text-xl font-semibold text-gray-900 mb-2">
+              <h4 className="text-xl font-semibold text-[#1a1a1a] mb-2">
                 One-Click Vote
               </h4>
               <p className="text-gray-600">
@@ -72,10 +82,10 @@ export default function HomePage() {
             </div>
 
             <div className="text-center p-6">
-              <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <div className="w-16 h-16 bg-[#0066b3]/10 rounded-full flex items-center justify-center mx-auto mb-4">
                 <span className="text-2xl">📊</span>
               </div>
-              <h4 className="text-xl font-semibold text-gray-900 mb-2">
+              <h4 className="text-xl font-semibold text-[#1a1a1a] mb-2">
                 See Results
               </h4>
               <p className="text-gray-600">
@@ -89,7 +99,7 @@ export default function HomePage() {
       {/* Latest Poll Preview */}
       <section className="py-20 bg-gray-100">
         <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
-          <h3 className="text-3xl font-bold text-gray-900 mb-6">
+          <h3 className="text-3xl font-bold text-[#1a1a1a] mb-6">
             See What We&apos;re Asking
           </h3>
           <p className="text-gray-600 mb-8">
@@ -98,13 +108,13 @@ export default function HomePage() {
           <div className="space-x-4">
             <Link
               href="/polls"
-              className="inline-block px-6 py-3 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 transition-colors"
+              className="inline-block px-6 py-3 bg-[#e31c23] text-white font-semibold rounded-lg hover:bg-[#c41920] transition-colors"
             >
               View Current Poll
             </Link>
             <Link
               href="/archive"
-              className="inline-block px-6 py-3 bg-white text-blue-600 font-semibold rounded-lg border border-blue-600 hover:bg-blue-50 transition-colors"
+              className="inline-block px-6 py-3 bg-white text-[#0066b3] font-semibold rounded-lg border border-[#0066b3] hover:bg-[#0066b3]/5 transition-colors"
             >
               Browse Archive
             </Link>
@@ -113,11 +123,17 @@ export default function HomePage() {
       </section>
 
       {/* Footer */}
-      <footer className="bg-gray-900 text-gray-400 py-12">
+      <footer className="bg-[#1a1a1a] text-gray-400 py-12">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex flex-col md:flex-row justify-between items-center">
             <div className="mb-6 md:mb-0">
-              <h4 className="text-white text-xl font-bold mb-2">Liberty Surveys</h4>
+              <Image
+                src="/logo.png"
+                alt="Liberty Surveys"
+                width={160}
+                height={48}
+                className="h-10 w-auto mb-2 brightness-0 invert"
+              />
               <p className="text-sm">Making your voice heard, one poll at a time.</p>
             </div>
             <div className="flex space-x-8">

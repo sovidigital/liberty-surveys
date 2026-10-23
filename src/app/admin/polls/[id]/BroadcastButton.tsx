@@ -49,7 +49,7 @@ export function BroadcastButton({ pollId, pollStatus }: Props) {
         <button
           onClick={handleBroadcast}
           disabled={loading}
-          className="px-4 py-2 bg-green-600 text-white font-medium rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          className="px-4 py-2 bg-[#0066b3] text-white font-medium rounded-lg hover:bg-[#004d8a] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         >
           {loading ? 'Sending...' : 'Resend Broadcast'}
         </button>
@@ -67,7 +67,7 @@ export function BroadcastButton({ pollId, pollStatus }: Props) {
       <button
         onClick={handleBroadcast}
         disabled={loading}
-        className="px-4 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        className="px-4 py-2 bg-[#e31c23] text-white font-medium rounded-lg hover:bg-[#c41920] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
       >
         {loading ? 'Publishing...' : 'Publish & Send Broadcast'}
       </button>

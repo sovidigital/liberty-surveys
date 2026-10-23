@@ -44,7 +44,7 @@ Scheduled Job → Fetch Active Poll → Customer.io Broadcast → Subscribers Re
 **Steps:**
 1. Admin creates poll with question and options (2-4 choices)
 2. Admin schedules poll for a specific date
-3. At scheduled time (default: 8 AM ET), system triggers Customer.io API-triggered broadcast
+3. At scheduled time (7:00 AM ET daily), system triggers Customer.io API-triggered broadcast
 4. Broadcast includes poll question and signed vote links for each option
 5. Each vote link contains: `poll_id`, `option_id`, `subscriber_id`, HMAC signature
 
@@ -275,6 +275,70 @@ Since DSQL doesn't support foreign keys, the application must:
 2. **Welcome Email** - Sent after confirmation (via automation)
 3. **Unsubscribe Confirmation** - Sent when user unsubscribes
 
+### Customer.io Workspace Setup Checklist
+
+The owner needs to complete these steps in Customer.io to set up the "Liberty Surveys" workspace:
+
+#### 1. Create Workspace
+- [ ] Sign up or log in at https://customer.io
+- [ ] Create a new workspace named "Liberty Surveys"
+- [ ] Select **US region** (track-api.customer.io)
+
+#### 2. Configure Sending Domain
+- [ ] Go to **Settings > Sending Domain**
+- [ ] Add `libertysurveys.com` as the sending domain
+- [ ] Add DNS records to your domain:
+  - DKIM record (TXT)
+  - SPF record (TXT)
+  - Return-Path CNAME
+- [ ] Wait for verification (can take up to 48 hours)
+- [ ] Set sender email: `polls@libertysurveys.com`
+- [ ] Set sender name: "Liberty Surveys"
+
+#### 3. Generate API Credentials
+- [ ] Go to **Settings > API & Webhook Credentials**
+- [ ] Copy **Site ID** → set as `CUSTOMERIO_SITE_ID`
+- [ ] Copy **API Key** (Track API) → set as `CUSTOMERIO_API_KEY`
+- [ ] Create an **App API Key** → set as `CUSTOMERIO_APP_API_KEY`
+- [ ] Note the **Environment ID** from workspace URL → set as `CUSTOMERIO_ENVIRONMENT_ID`
+
+#### 4. Create Transactional Messages
+- [ ] Go to **Transactional > Messages**
+- [ ] Create "Confirmation Email" transactional message:
+  - Subject: "Confirm your Liberty Surveys subscription"
+  - Body: Include `{{ trigger.confirm_url }}` link
+  - Note the message ID → set as `CUSTOMERIO_CONFIRM_MESSAGE_ID`
+
+#### 5. Create API-Triggered Broadcast
+- [ ] Go to **Campaigns > Broadcasts**
+- [ ] Create new API-triggered broadcast named "Daily Poll"
+- [ ] Set audience: Segment where `subscription_status = active`
+- [ ] Design email template:
+  - Subject: "Today's Poll: {{ trigger.poll_question | truncate: 50 }}"
+  - Body: Include poll question and vote buttons using `trigger.options` array
+  - Each button links to option's `vote_url`
+  - Include unsubscribe link in footer
+- [ ] Note the campaign ID → set as `CUSTOMERIO_BROADCAST_CAMPAIGN_ID`
+
+#### 6. Email Template Variables
+
+**Confirmation Email:**
+```liquid
+{{ trigger.confirm_url }}        - Signed confirmation link
+{{ trigger.subscriber_email }}   - Subscriber's email
+```
+
+**Daily Poll Broadcast:**
+```liquid
+{{ trigger.poll_id }}            - Poll identifier
+{{ trigger.poll_question }}      - The poll question
+{{ trigger.options }}            - Array of vote options
+{{ trigger.options[0].text }}    - Option text
+{{ trigger.options[0].vote_url }} - Signed vote URL
+{{ trigger.results_url }}        - Link to results page
+{{ customer.unsubscribe_url }}   - Unsubscribe link (auto-generated)
+```
+
 ---
 
 ## Poll Creation & Scheduling (Admin)
@@ -305,7 +369,8 @@ Since DSQL doesn't support foreign keys, the application must:
 ### Scheduling Implementation
 
 **Option A: External Cron (Recommended for MVP)**
-- AWS EventBridge rule triggers Lambda at 8 AM ET daily
+- AWS EventBridge Scheduler rule triggers Lambda at 7:00 AM ET daily
+- Cron expression: `cron(0 7 * * ? *)` in `America/New_York` timezone
 - Lambda calls internal API endpoint to process scheduled polls
 
 **Option B: Database-Driven Polling**
@@ -514,34 +579,56 @@ Start with Customer.io event tracking (already required) plus basic page view lo
 
 ---
 
-## Open Questions for Owner
+## Owner's Configuration
 
-Please clarify the following to finalize implementation:
+The following settings have been confirmed by the owner:
 
-### Content & Operations
+### Domain & URLs
+- **Domain**: `libertysurveys.com`
+- **Base URL**: `https://libertysurveys.com`
+- **Signed link base**: `https://libertysurveys.com`
 
-1. **Who writes the polls?** Single admin, or multiple contributors?
-2. **Poll frequency?** Daily, or sometimes skip days (weekends)?
-3. **Send time?** What time and timezone for daily emails? (Assumed 8 AM ET)
-4. **Poll duration?** How long should polls stay open? (Assumed 24 hours)
+### Scheduling
+- **Daily send time**: 7:00 AM America/New_York (ET)
+- **Frequency**: Every day including weekends
+- **Poll duration**: 24 hours (until next poll)
+- **EventBridge cron**: `cron(0 7 * * ? *)` (7 AM ET daily)
 
-### Branding & Design
+### AWS Configuration
+- **Region**: us-east-1
+- **Services**: Amplify Hosting, Aurora DSQL, Secrets Manager, EventBridge
 
-5. **Domain name?** (e.g., libertysurveys.com)
-6. **Brand colors/logo?** Any existing brand guidelines?
-7. **Email from name/address?** (e.g., "Liberty Surveys <polls@libertysurveys.com>")
+### Customer.io Configuration
+- **Workspace name**: "Liberty Surveys"
+- **Region**: US (track-api.customer.io)
+- **Sender name**: "Liberty Surveys"
+- **Sender domain**: libertysurveys.com (requires DNS verification)
 
-### Technical
+### Branding
+- **Logo**: `public/logo.png`
+- **Color palette**:
+  - Charcoal (wordmark): `#1a1a1a`
+  - Red (script "Surveys" and flame): `#e31c23`
+  - Blue (flame accents): `#0066b3`
+  - White (background): `#ffffff`
 
-8. **AWS account/region?** Which AWS account and preferred region?
-9. **Customer.io workspace?** Existing workspace or new?
-10. **Analytics preferences?** Any existing analytics tools to integrate?
+### Admin Authentication
+- **Mock mode only**: Hardcoded test credentials (`admin@example.com` / `admin123`) are **only** available when `USE_MOCK_DB=true`
+- **Production**: Requires database-configured admin users with environment-sourced credentials
 
-### Legal & Compliance
+---
 
-11. **Privacy policy needed?** (Required for email collection)
-12. **Terms of service?** 
-13. **Data retention policy?** How long to keep vote history?
+## Remaining Open Questions
+
+### Legal & Compliance (To Be Addressed)
+
+1. **Privacy policy needed?** (Required for email collection)
+2. **Terms of service?** 
+3. **Data retention policy?** How long to keep vote history?
+
+### Content Operations
+
+4. **Who writes the polls?** Single admin, or multiple contributors?
 
 ---
 

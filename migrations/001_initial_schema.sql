@@ -98,8 +98,18 @@ CREATE TABLE IF NOT EXISTS admin_users (
 -- Note: In production, remove or comment out this seed data section.
 -- These are sample polls for development purposes only.
 
--- Sample admin user (password: "admin123" - CHANGE IN PRODUCTION)
--- Password hash generated with bcrypt, 12 rounds
+-- IMPORTANT: Admin users should be created via secure process in production.
+-- The hardcoded test credentials (admin@example.com / admin123) only work
+-- when USE_MOCK_DB=true in the application. This seed data is for database
+-- testing only and should NOT be relied upon for production authentication.
+--
+-- To create a production admin user:
+-- 1. Generate a bcrypt hash: npx bcryptjs hash "your-secure-password"
+-- 2. Insert with a unique ULID and your email
+-- 3. Store credentials securely (AWS Secrets Manager recommended)
+
+-- Sample admin user for DATABASE TESTING ONLY (not used by app in mock mode)
+-- Application uses mock auth when USE_MOCK_DB=true
 INSERT INTO admin_users (id, email, password_hash, created_at)
 VALUES (
   '01JARQVX0000000000000001',

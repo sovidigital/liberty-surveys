@@ -102,13 +102,13 @@ export default async function AdminDashboard() {
           <div className="mt-2 space-y-2">
             <Link
               href="/admin/polls/new"
-              className="block text-blue-600 hover:text-blue-800 text-sm font-medium"
+              className="block text-[#e31c23] hover:text-[#c41920] text-sm font-medium"
             >
               + Create New Poll
             </Link>
             <Link
               href="/admin/polls"
-              className="block text-blue-600 hover:text-blue-800 text-sm font-medium"
+              className="block text-[#0066b3] hover:text-[#004d8a] text-sm font-medium"
             >
               View All Polls
             </Link>
@@ -125,7 +125,7 @@ export default async function AdminDashboard() {
             <ol className="list-decimal list-inside space-y-3">
               <li>
                 <strong>Create a poll</strong> - Go to{' '}
-                <Link href="/admin/polls/new" className="text-blue-600 hover:underline">
+                <Link href="/admin/polls/new" className="text-[#0066b3] hover:underline">
                   Create Poll
                 </Link>{' '}
                 and add your question with 2-4 answer options.
