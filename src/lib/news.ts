@@ -13,31 +13,169 @@ interface NewsSource {
   rssUrl?: string;
 }
 
-export const NEWS_SOURCES: NewsSource[] = [
-  // Left-leaning
-  { name: 'CNN', domain: 'cnn.com', politicalLean: 'left', rssUrl: 'http://rss.cnn.com/rss/cnn_topstories.rss' },
-  { name: 'MSNBC', domain: 'msnbc.com', politicalLean: 'left' },
-  { name: 'The New York Times', domain: 'nytimes.com', politicalLean: 'center-left', rssUrl: 'https://rss.nytimes.com/services/xml/rss/nyt/Politics.xml' },
-  { name: 'The Washington Post', domain: 'washingtonpost.com', politicalLean: 'center-left' },
-  { name: 'NPR', domain: 'npr.org', politicalLean: 'center-left', rssUrl: 'https://feeds.npr.org/1001/rss.xml' },
-  { name: 'The Guardian', domain: 'theguardian.com', politicalLean: 'left', rssUrl: 'https://www.theguardian.com/us-news/rss' },
-  
-  // Center
-  { name: 'Associated Press', domain: 'apnews.com', politicalLean: 'center', rssUrl: 'https://rsshub.app/apnews/topics/apf-politics' },
-  { name: 'Reuters', domain: 'reuters.com', politicalLean: 'center', rssUrl: 'https://www.reutersagency.com/feed/?taxonomy=best-topics&post_type=best' },
-  { name: 'BBC', domain: 'bbc.com', politicalLean: 'center', rssUrl: 'http://feeds.bbci.co.uk/news/world/us_and_canada/rss.xml' },
-  { name: 'PBS', domain: 'pbs.org', politicalLean: 'center' },
-  { name: 'The Hill', domain: 'thehill.com', politicalLean: 'center', rssUrl: 'https://thehill.com/news/feed/' },
-  { name: 'Axios', domain: 'axios.com', politicalLean: 'center' },
-  
-  // Right-leaning
-  { name: 'Fox News', domain: 'foxnews.com', politicalLean: 'right', rssUrl: 'https://moxie.foxnews.com/google-publisher/politics.xml' },
-  { name: 'Wall Street Journal', domain: 'wsj.com', politicalLean: 'center-right' },
-  { name: 'New York Post', domain: 'nypost.com', politicalLean: 'right', rssUrl: 'https://nypost.com/news/feed/' },
-  { name: 'The Federalist', domain: 'thefederalist.com', politicalLean: 'right' },
-  { name: 'National Review', domain: 'nationalreview.com', politicalLean: 'right', rssUrl: 'https://www.nationalreview.com/feed/' },
-  { name: 'The Daily Wire', domain: 'dailywire.com', politicalLean: 'right' },
+// Balanced RSS sources across the political spectrum
+// Configure additional sources via NEWS_SOURCES_JSON env var (JSON array)
+const DEFAULT_NEWS_SOURCES: NewsSource[] = [
+  // Left-leaning sources
+  { 
+    name: 'CNN', 
+    domain: 'cnn.com', 
+    politicalLean: 'left', 
+    rssUrl: 'http://rss.cnn.com/rss/cnn_topstories.rss' 
+  },
+  { 
+    name: 'The Guardian', 
+    domain: 'theguardian.com', 
+    politicalLean: 'left', 
+    rssUrl: 'https://www.theguardian.com/us-news/rss' 
+  },
+  { 
+    name: 'MSNBC', 
+    domain: 'msnbc.com', 
+    politicalLean: 'left', 
+    rssUrl: 'https://www.msnbc.com/feeds/latest' 
+  },
+
+  // Center-left sources
+  { 
+    name: 'The New York Times', 
+    domain: 'nytimes.com', 
+    politicalLean: 'center-left', 
+    rssUrl: 'https://rss.nytimes.com/services/xml/rss/nyt/Politics.xml' 
+  },
+  { 
+    name: 'The Washington Post', 
+    domain: 'washingtonpost.com', 
+    politicalLean: 'center-left', 
+    rssUrl: 'https://feeds.washingtonpost.com/rss/politics' 
+  },
+  { 
+    name: 'NPR', 
+    domain: 'npr.org', 
+    politicalLean: 'center-left', 
+    rssUrl: 'https://feeds.npr.org/1001/rss.xml' 
+  },
+  { 
+    name: 'Politico', 
+    domain: 'politico.com', 
+    politicalLean: 'center-left', 
+    rssUrl: 'https://rss.politico.com/politics-news.xml' 
+  },
+
+  // Center sources
+  { 
+    name: 'Associated Press', 
+    domain: 'apnews.com', 
+    politicalLean: 'center', 
+    rssUrl: 'https://rsshub.app/apnews/topics/apf-politics' 
+  },
+  { 
+    name: 'Reuters', 
+    domain: 'reuters.com', 
+    politicalLean: 'center', 
+    rssUrl: 'https://www.reutersagency.com/feed/?taxonomy=best-topics&post_type=best' 
+  },
+  { 
+    name: 'BBC', 
+    domain: 'bbc.com', 
+    politicalLean: 'center', 
+    rssUrl: 'http://feeds.bbci.co.uk/news/world/us_and_canada/rss.xml' 
+  },
+  { 
+    name: 'The Hill', 
+    domain: 'thehill.com', 
+    politicalLean: 'center', 
+    rssUrl: 'https://thehill.com/news/feed/' 
+  },
+  { 
+    name: 'Axios', 
+    domain: 'axios.com', 
+    politicalLean: 'center', 
+    rssUrl: 'https://api.axios.com/feed/' 
+  },
+  { 
+    name: 'PBS NewsHour', 
+    domain: 'pbs.org', 
+    politicalLean: 'center', 
+    rssUrl: 'https://www.pbs.org/newshour/feeds/rss/headlines' 
+  },
+
+  // Center-right sources
+  { 
+    name: 'Wall Street Journal', 
+    domain: 'wsj.com', 
+    politicalLean: 'center-right', 
+    rssUrl: 'https://feeds.a.dj.com/rss/RSSOpinion.xml' 
+  },
+  { 
+    name: 'The Economist', 
+    domain: 'economist.com', 
+    politicalLean: 'center-right', 
+    rssUrl: 'https://www.economist.com/united-states/rss.xml' 
+  },
+  { 
+    name: 'RealClearPolitics', 
+    domain: 'realclearpolitics.com', 
+    politicalLean: 'center-right', 
+    rssUrl: 'https://www.realclearpolitics.com/index.xml' 
+  },
+
+  // Right-leaning sources
+  { 
+    name: 'Fox News', 
+    domain: 'foxnews.com', 
+    politicalLean: 'right', 
+    rssUrl: 'https://moxie.foxnews.com/google-publisher/politics.xml' 
+  },
+  { 
+    name: 'New York Post', 
+    domain: 'nypost.com', 
+    politicalLean: 'right', 
+    rssUrl: 'https://nypost.com/news/feed/' 
+  },
+  { 
+    name: 'National Review', 
+    domain: 'nationalreview.com', 
+    politicalLean: 'right', 
+    rssUrl: 'https://www.nationalreview.com/feed/' 
+  },
+  { 
+    name: 'The Daily Wire', 
+    domain: 'dailywire.com', 
+    politicalLean: 'right', 
+    rssUrl: 'https://www.dailywire.com/feeds/rss.xml' 
+  },
+  { 
+    name: 'Washington Examiner', 
+    domain: 'washingtonexaminer.com', 
+    politicalLean: 'right', 
+    rssUrl: 'https://www.washingtonexaminer.com/section/news/feed' 
+  },
+  { 
+    name: 'The Federalist', 
+    domain: 'thefederalist.com', 
+    politicalLean: 'right', 
+    rssUrl: 'https://thefederalist.com/feed/' 
+  },
 ];
+
+function getConfiguredSources(): NewsSource[] {
+  const customSourcesJson = process.env.NEWS_SOURCES_JSON;
+  
+  if (customSourcesJson) {
+    try {
+      const customSources = JSON.parse(customSourcesJson) as NewsSource[];
+      console.log(`[NEWS] Using ${customSources.length} custom news sources from NEWS_SOURCES_JSON`);
+      return customSources;
+    } catch (error) {
+      console.warn('[NEWS] Failed to parse NEWS_SOURCES_JSON, using defaults:', error);
+    }
+  }
+  
+  return DEFAULT_NEWS_SOURCES;
+}
+
+export const NEWS_SOURCES = getConfiguredSources();
 
 export function getSourcePoliticalLean(sourceName: string, sourceUrl: string): PoliticalLean {
   const normalizedName = sourceName.toLowerCase();
@@ -53,73 +191,15 @@ export function getSourcePoliticalLean(sourceName: string, sourceUrl: string): P
   return 'center';
 }
 
-// ============================================================================
-// NewsAPI.org Client
-// ============================================================================
-
-interface NewsAPIResponse {
-  status: string;
-  totalResults: number;
-  articles: Array<{
-    source: { id: string | null; name: string };
-    author: string | null;
-    title: string;
-    description: string;
-    url: string;
-    urlToImage: string | null;
-    publishedAt: string;
-    content: string | null;
-  }>;
-}
-
-async function fetchFromNewsAPI(query: string = 'politics'): Promise<NewsArticle[]> {
-  const apiKey = process.env.NEWSAPI_API_KEY;
-  
-  if (!apiKey) {
-    console.warn('[NEWS] NewsAPI key not configured, skipping');
-    return [];
-  }
-  
-  try {
-    const params = new URLSearchParams({
-      q: query,
-      language: 'en',
-      sortBy: 'publishedAt',
-      pageSize: '100',
-    });
-    
-    const response = await fetch(
-      `https://newsapi.org/v2/everything?${params}`,
-      {
-        headers: { 'X-Api-Key': apiKey },
-        next: { revalidate: 0 },
-      }
-    );
-    
-    if (!response.ok) {
-      console.error('[NEWS] NewsAPI error:', response.status, await response.text());
-      return [];
-    }
-    
-    const data: NewsAPIResponse = await response.json();
-    
-    return data.articles
-      .filter(article => article.title && article.url)
-      .map(article => ({
-        title: article.title,
-        description: article.description || '',
-        content: article.content,
-        url: article.url,
-        source: {
-          name: article.source.name,
-          politicalLean: getSourcePoliticalLean(article.source.name, article.url),
-        },
-        publishedAt: new Date(article.publishedAt),
-      }));
-  } catch (error) {
-    console.error('[NEWS] NewsAPI fetch error:', error);
-    return [];
-  }
+export function getSourceBalance(): { left: number; centerLeft: number; center: number; centerRight: number; right: number } {
+  const sources = NEWS_SOURCES.filter(s => s.rssUrl);
+  return {
+    left: sources.filter(s => s.politicalLean === 'left').length,
+    centerLeft: sources.filter(s => s.politicalLean === 'center-left').length,
+    center: sources.filter(s => s.politicalLean === 'center').length,
+    centerRight: sources.filter(s => s.politicalLean === 'center-right').length,
+    right: sources.filter(s => s.politicalLean === 'right').length,
+  };
 }
 
 // ============================================================================
@@ -130,12 +210,18 @@ async function fetchFromRSS(source: NewsSource): Promise<NewsArticle[]> {
   if (!source.rssUrl) return [];
   
   try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
+    
     const response = await fetch(source.rssUrl, {
-      next: { revalidate: 0 },
+      signal: controller.signal,
       headers: {
-        'User-Agent': 'LibertySurveys/1.0',
+        'User-Agent': 'LibertySurveys/1.0 (Political Polling Platform)',
+        'Accept': 'application/rss+xml, application/xml, text/xml',
       },
     });
+    
+    clearTimeout(timeoutId);
     
     if (!response.ok) {
       console.warn(`[NEWS] RSS fetch failed for ${source.name}:`, response.status);
@@ -145,9 +231,14 @@ async function fetchFromRSS(source: NewsSource): Promise<NewsArticle[]> {
     const xml = await response.text();
     const articles = parseRSSFeed(xml, source);
     
+    console.log(`[NEWS] Fetched ${articles.length} articles from ${source.name}`);
     return articles;
   } catch (error) {
-    console.warn(`[NEWS] RSS error for ${source.name}:`, error);
+    if (error instanceof Error && error.name === 'AbortError') {
+      console.warn(`[NEWS] RSS timeout for ${source.name}`);
+    } else {
+      console.warn(`[NEWS] RSS error for ${source.name}:`, error);
+    }
     return [];
   }
 }
@@ -165,13 +256,14 @@ function parseRSSFeed(xml: string, source: NewsSource): NewsArticle[] {
     const description = extractXMLTag(item, 'description') || extractXMLTag(item, 'summary');
     const link = extractXMLTag(item, 'link') || extractXMLTag(item, 'guid');
     const pubDate = extractXMLTag(item, 'pubDate') || extractXMLTag(item, 'published');
+    const content = extractXMLTag(item, 'content:encoded') || extractXMLTag(item, 'content');
     
     if (title && link) {
       articles.push({
         title: cleanHTMLEntities(title),
         description: cleanHTMLEntities(description || ''),
-        content: null,
-        url: link,
+        content: content ? cleanHTMLEntities(content).slice(0, 1000) : null,
+        url: link.trim(),
         source: {
           name: source.name,
           politicalLean: source.politicalLean,
@@ -205,7 +297,154 @@ function cleanHTMLEntities(text: string): string {
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
     .replace(/&nbsp;/g, ' ')
+    .replace(/&#\d+;/g, '')
     .trim();
+}
+
+// ============================================================================
+// xAI Web Search Integration
+// ============================================================================
+
+interface WebSearchResult {
+  url: string;
+  title: string;
+  snippet: string;
+}
+
+async function searchWithXai(query: string): Promise<WebSearchResult[]> {
+  const apiKey = process.env.XAI_API_KEY;
+  
+  if (!apiKey) {
+    console.warn('[NEWS] XAI_API_KEY not set, skipping web search');
+    return [];
+  }
+  
+  try {
+    const response = await fetch('https://api.x.ai/v1/responses', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: process.env.XAI_MODEL || 'grok-4.7',
+        input: [
+          { role: 'system', content: 'You are a research assistant. Search for recent news articles about the given political topic. Return ONLY a JSON array of articles with url, title, and snippet fields. Include articles from diverse political perspectives.' },
+          { role: 'user', content: `Find recent news articles about: ${query}` },
+        ],
+        tools: [{ type: 'web_search' }],
+        max_output_tokens: 2048,
+        reasoning_effort: 'none',
+      }),
+    });
+    
+    if (!response.ok) {
+      console.warn('[NEWS] xAI web search failed:', response.status);
+      return [];
+    }
+    
+    const data = await response.json();
+    
+    const text = data.output
+      ?.filter((o: { type: string }) => o.type === 'message')
+      ?.flatMap((o: { content: Array<{ type: string; text: string }> }) => o.content)
+      ?.filter((c: { type: string }) => c.type === 'text')
+      ?.map((c: { text: string }) => c.text)
+      ?.join('') || '';
+    
+    const jsonMatch = text.match(/\[[\s\S]*\]/);
+    if (jsonMatch) {
+      const results = JSON.parse(jsonMatch[0]) as WebSearchResult[];
+      console.log(`[NEWS] xAI search found ${results.length} articles for "${query}"`);
+      return results;
+    }
+    
+    return [];
+  } catch (error) {
+    console.warn('[NEWS] xAI web search error:', error);
+    return [];
+  }
+}
+
+async function verifyAndFetchUrl(url: string): Promise<{ title: string; description: string; content: string | null } | null> {
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 8000);
+    
+    const response = await fetch(url, {
+      signal: controller.signal,
+      headers: {
+        'User-Agent': 'LibertySurveys/1.0 (Political Polling Platform)',
+      },
+    });
+    
+    clearTimeout(timeoutId);
+    
+    if (!response.ok) return null;
+    
+    const html = await response.text();
+    
+    const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
+    const title = titleMatch ? cleanHTMLEntities(titleMatch[1]) : '';
+    
+    const descMatch = html.match(/<meta[^>]*name=["']description["'][^>]*content=["']([^"']+)["']/i) ||
+                      html.match(/<meta[^>]*content=["']([^"']+)["'][^>]*name=["']description["']/i);
+    const description = descMatch ? cleanHTMLEntities(descMatch[1]) : '';
+    
+    const articleMatch = html.match(/<article[^>]*>([\s\S]*?)<\/article>/i);
+    const content = articleMatch ? cleanHTMLEntities(articleMatch[1]).slice(0, 1000) : null;
+    
+    return { title, description, content };
+  } catch {
+    return null;
+  }
+}
+
+export async function supplementWithWebSearch(
+  topic: string,
+  existingUrls: Set<string>
+): Promise<NewsArticle[]> {
+  if (USE_MOCK) return [];
+  
+  console.log(`[NEWS] Supplementing with xAI web search for: ${topic}`);
+  
+  const searchResults = await searchWithXai(`${topic} political news recent`);
+  const supplementedArticles: NewsArticle[] = [];
+  
+  for (const result of searchResults) {
+    if (existingUrls.has(result.url)) continue;
+    
+    const verified = await verifyAndFetchUrl(result.url);
+    if (!verified) continue;
+    
+    const politicalLean = getSourcePoliticalLean('', result.url);
+    
+    supplementedArticles.push({
+      title: verified.title || result.title,
+      description: verified.description || result.snippet,
+      content: verified.content,
+      url: result.url,
+      source: {
+        name: extractDomainName(result.url),
+        politicalLean,
+      },
+      publishedAt: new Date(),
+    });
+    
+    existingUrls.add(result.url);
+  }
+  
+  console.log(`[NEWS] Web search added ${supplementedArticles.length} verified articles`);
+  return supplementedArticles;
+}
+
+function extractDomainName(url: string): string {
+  try {
+    const hostname = new URL(url).hostname;
+    return hostname.replace(/^www\./, '').split('.')[0];
+  } catch {
+    return 'Unknown';
+  }
 }
 
 // ============================================================================
@@ -220,7 +459,7 @@ function getMockNewsArticles(): NewsArticle[] {
       title: 'Congress Debates New Infrastructure Bill',
       description: 'Lawmakers are divided on a proposed $500 billion infrastructure package that would fund roads, bridges, and broadband expansion.',
       content: 'The House is expected to vote on the measure next week...',
-      url: 'https://example.com/infrastructure-bill',
+      url: 'https://apnews.com/article/infrastructure-bill-2026',
       source: { name: 'Associated Press', politicalLean: 'center' },
       publishedAt: new Date(now.getTime() - 2 * 60 * 60 * 1000),
     },
@@ -228,7 +467,7 @@ function getMockNewsArticles(): NewsArticle[] {
       title: 'Infrastructure Plan Faces Republican Opposition',
       description: 'GOP leaders criticize the spending levels in the proposed infrastructure bill.',
       content: 'Senate Republicans have raised concerns about the price tag...',
-      url: 'https://example.com/gop-infrastructure',
+      url: 'https://foxnews.com/politics/infrastructure-gop-opposition',
       source: { name: 'Fox News', politicalLean: 'right' },
       publishedAt: new Date(now.getTime() - 3 * 60 * 60 * 1000),
     },
@@ -236,48 +475,48 @@ function getMockNewsArticles(): NewsArticle[] {
       title: 'Democrats Push for Broader Infrastructure Investment',
       description: 'Progressive lawmakers argue the bill should include climate provisions.',
       content: 'The Congressional Progressive Caucus is pushing for amendments...',
-      url: 'https://example.com/dem-infrastructure',
+      url: 'https://cnn.com/politics/infrastructure-democrats-climate',
       source: { name: 'CNN', politicalLean: 'left' },
       publishedAt: new Date(now.getTime() - 4 * 60 * 60 * 1000),
     },
     {
-      title: 'Supreme Court to Hear Major Privacy Case',
-      description: 'The court will decide whether warrants are required for location data.',
-      content: 'Civil liberties groups are watching the case closely...',
-      url: 'https://example.com/scotus-privacy',
-      source: { name: 'Reuters', politicalLean: 'center' },
+      title: 'Analysis: The Infrastructure Compromise',
+      description: 'Both parties see potential gains in passing bipartisan legislation.',
+      content: 'Political analysts suggest both parties have incentives to negotiate...',
+      url: 'https://thehill.com/opinion/infrastructure-compromise-analysis',
+      source: { name: 'The Hill', politicalLean: 'center' },
       publishedAt: new Date(now.getTime() - 5 * 60 * 60 * 1000),
     },
     {
-      title: 'Privacy Advocates Urge Strong Protections',
-      description: 'Groups argue that digital privacy requires updated legal frameworks.',
-      content: 'The ACLU filed an amicus brief supporting warrant requirements...',
-      url: 'https://example.com/privacy-advocates',
+      title: 'White House Defends Infrastructure Priorities',
+      description: 'Administration officials make the case for the spending package.',
+      content: 'Press secretary outlined the economic benefits of the proposal...',
+      url: 'https://nytimes.com/politics/white-house-infrastructure',
       source: { name: 'The New York Times', politicalLean: 'center-left' },
       publishedAt: new Date(now.getTime() - 6 * 60 * 60 * 1000),
     },
     {
-      title: 'Law Enforcement Groups Warn Against New Restrictions',
-      description: 'Police associations say warrant requirements could hinder investigations.',
-      content: 'The Fraternal Order of Police submitted testimony...',
-      url: 'https://example.com/law-enforcement-privacy',
+      title: 'Conservative Groups Question Infrastructure Costs',
+      description: 'Think tanks argue for more limited federal involvement.',
+      content: 'The Heritage Foundation released a study on alternative approaches...',
+      url: 'https://nationalreview.com/infrastructure-costs-analysis',
       source: { name: 'National Review', politicalLean: 'right' },
       publishedAt: new Date(now.getTime() - 7 * 60 * 60 * 1000),
     },
     {
-      title: 'Federal Reserve Signals Potential Rate Changes',
-      description: 'The Fed chair hints at possible adjustments to monetary policy.',
-      content: 'In remarks to Congress, the chair discussed inflation concerns...',
-      url: 'https://example.com/fed-rates',
-      source: { name: 'Wall Street Journal', politicalLean: 'center-right' },
+      title: 'State Governors Weigh In on Federal Infrastructure Plans',
+      description: 'Bipartisan group of governors supports federal investment.',
+      content: 'The National Governors Association issued a joint statement...',
+      url: 'https://reuters.com/article/governors-infrastructure-support',
+      source: { name: 'Reuters', politicalLean: 'center' },
       publishedAt: new Date(now.getTime() - 8 * 60 * 60 * 1000),
     },
     {
-      title: 'Economists Debate Inflation Response',
-      description: 'Experts disagree on whether current policies are sufficient.',
-      content: 'Some economists argue for more aggressive action...',
-      url: 'https://example.com/inflation-debate',
-      source: { name: 'The Hill', politicalLean: 'center' },
+      title: 'Labor Unions Back Infrastructure Package',
+      description: 'Major unions see job creation opportunities in the bill.',
+      content: 'AFL-CIO president praised the investment in American workers...',
+      url: 'https://washingtonpost.com/politics/unions-infrastructure-support',
+      source: { name: 'The Washington Post', politicalLean: 'center-left' },
       publishedAt: new Date(now.getTime() - 9 * 60 * 60 * 1000),
     },
   ];
@@ -362,16 +601,16 @@ export function clusterArticlesByTopic(articles: NewsArticle[]): TopicCluster[] 
 // ============================================================================
 
 export interface FetchNewsOptions {
-  queries?: string[];
   maxArticles?: number;
-  includeRSS?: boolean;
+  useWebSearch?: boolean;
+  webSearchQuery?: string;
 }
 
 export async function fetchNews(options: FetchNewsOptions = {}): Promise<NewsArticle[]> {
   const {
-    queries = ['politics', 'congress', 'policy'],
     maxArticles = 200,
-    includeRSS = true,
+    useWebSearch = true,
+    webSearchQuery = 'US politics current events',
   } = options;
   
   if (USE_MOCK) {
@@ -379,30 +618,20 @@ export async function fetchNews(options: FetchNewsOptions = {}): Promise<NewsArt
     return getMockNewsArticles();
   }
   
-  console.log('[NEWS] Fetching news from multiple sources...');
+  const sources = NEWS_SOURCES.filter(s => s.rssUrl);
+  const balance = getSourceBalance();
+  console.log(`[NEWS] Fetching from ${sources.length} RSS sources...`);
+  console.log(`[NEWS] Source balance: Left=${balance.left}, CenterLeft=${balance.centerLeft}, Center=${balance.center}, CenterRight=${balance.centerRight}, Right=${balance.right}`);
   
   const allArticles: NewsArticle[] = [];
   const seenUrls = new Set<string>();
   
-  for (const query of queries) {
-    const newsApiArticles = await fetchFromNewsAPI(query);
-    for (const article of newsApiArticles) {
-      if (!seenUrls.has(article.url)) {
-        seenUrls.add(article.url);
-        allArticles.push(article);
-      }
-    }
-  }
+  const rssPromises = sources.map(source => fetchFromRSS(source));
+  const rssResults = await Promise.allSettled(rssPromises);
   
-  if (includeRSS) {
-    const rssPromises = NEWS_SOURCES
-      .filter(s => s.rssUrl)
-      .map(source => fetchFromRSS(source));
-    
-    const rssResults = await Promise.all(rssPromises);
-    
-    for (const articles of rssResults) {
-      for (const article of articles) {
+  for (const result of rssResults) {
+    if (result.status === 'fulfilled') {
+      for (const article of result.value) {
         if (!seenUrls.has(article.url)) {
           seenUrls.add(article.url);
           allArticles.push(article);
@@ -411,12 +640,19 @@ export async function fetchNews(options: FetchNewsOptions = {}): Promise<NewsArt
     }
   }
   
+  console.log(`[NEWS] Fetched ${allArticles.length} articles from RSS feeds`);
+  
+  if (useWebSearch && allArticles.length < maxArticles / 2) {
+    const webArticles = await supplementWithWebSearch(webSearchQuery, seenUrls);
+    allArticles.push(...webArticles);
+  }
+  
   const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
   const recentArticles = allArticles.filter(a => a.publishedAt > oneDayAgo);
   
   recentArticles.sort((a, b) => b.publishedAt.getTime() - a.publishedAt.getTime());
   
-  console.log(`[NEWS] Fetched ${recentArticles.length} recent articles`);
+  console.log(`[NEWS] Total: ${recentArticles.length} recent articles`);
   
   return recentArticles.slice(0, maxArticles);
 }
@@ -436,14 +672,12 @@ export async function fetchArticlesForTopic(
   }
   
   if (!USE_MOCK) {
-    const additionalArticles = await fetchFromNewsAPI(topic);
-    const seenUrls = new Set(topicArticles.map(a => a.url));
+    const existingUrls = new Set(topicArticles.map(a => a.url));
+    const supplemented = await supplementWithWebSearch(topic, existingUrls);
     
-    for (const article of additionalArticles) {
-      if (!seenUrls.has(article.url)) {
-        topicArticles.push(article);
-        if (topicArticles.length >= targetCount) break;
-      }
+    for (const article of supplemented) {
+      topicArticles.push(article);
+      if (topicArticles.length >= targetCount) break;
     }
   }
   

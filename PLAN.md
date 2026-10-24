@@ -131,20 +131,25 @@ Liberty Surveys uses a fully automated pipeline to generate daily polls with no 
 
 ### News Fetching
 
-**Primary Source: NewsAPI.org**
-- Aggregates articles from 80,000+ news sources
-- Fetches recent articles (last 24 hours) matching political/policy keywords
-- Production plan: $449/month for 100k requests
+**Primary Source: RSS Feeds**
+News is aggregated from 22+ politically balanced RSS feeds covering the full spectrum:
 
-**Supplementary: RSS Feeds**
-- Direct feeds from politically diverse outlets
-- Left-leaning: CNN, NYT, The Guardian, NPR, Washington Post
-- Center: AP, Reuters, BBC, PBS, The Hill, Axios
-- Right-leaning: Fox News, WSJ, National Review, NY Post, The Federalist
+| Political Lean | Sources |
+|----------------|---------|
+| Left | CNN, The Guardian, MSNBC |
+| Center-Left | NYT, Washington Post, NPR, Politico |
+| Center | AP, Reuters, BBC, The Hill, Axios, PBS |
+| Center-Right | WSJ, The Economist, RealClearPolitics |
+| Right | Fox News, NY Post, National Review, Daily Wire, Washington Examiner, The Federalist |
+
+**Supplementary: xAI Web Search**
+- When RSS coverage is thin, xAI's `web_search` tool finds additional articles
+- All search results are verified by fetching the URL and extracting content
+- Every cited fact must map to a real, verified article URL
 
 **Configuration:**
-- `NEWSAPI_API_KEY` - NewsAPI.org API key
 - `USE_MOCK_NEWS=true` - Use mock data for local development
+- `NEWS_SOURCES_JSON` - Optional: Custom RSS sources as JSON array
 
 ### Topic Selection
 
@@ -165,8 +170,8 @@ Topics must have at least 4 articles with coverage from multiple political persp
 - Both configurable via environment variables (`XAI_MODEL`, `XAI_BIAS_CHECK_MODEL`)
 - API endpoint: `https://api.x.ai/v1/responses` (OpenAI-compatible)
 
-**Optional: Live Search Enhancement**
-The xAI API supports built-in `web_search` and `x_search` tools that can supplement news gathering. However, every cited fact must still map to a real fetched article URL from NewsAPI or RSS feeds.
+**Live Search for Supplementation**
+When RSS feeds don't provide enough coverage for a topic, xAI's `web_search` tool automatically supplements with additional articles. All search results are verified by fetching the URL to confirm the article exists and extract its content. Every cited fact must map to a real, verified article URL.
 
 **Generation Output (Structured JSON):**
 ```json
@@ -288,23 +293,24 @@ npm run recap
 
 | Service | Cost | Notes |
 |---------|------|-------|
-| NewsAPI.org | $449/month | Production plan (100k requests) |
-| xAI Grok API | $20-60/month | ~30 polls/month at $2/1M in, $6/1M out |
+| RSS Feeds | Free | Public feeds from news outlets |
+| xAI Grok API | $30-80/month | Polls + web search, grok-4.7 at $2/1M in, $6/1M out |
 | Aurora DSQL | Pay-per-use | Depends on traffic |
 | Amplify Hosting | Pay-per-use | Depends on traffic |
 
 ### Environment Variables
 
 ```bash
-# News API
-NEWSAPI_API_KEY=your_api_key
-USE_MOCK_NEWS=false
-
-# xAI Grok API
+# xAI Grok API (for poll generation AND web search)
 XAI_API_KEY=your_xai_api_key
 XAI_MODEL=grok-4.7
 XAI_BIAS_CHECK_MODEL=grok-4.7
 USE_MOCK_LLM=false
+
+# News Sources
+USE_MOCK_NEWS=false
+# Optional: Custom sources as JSON array
+# NEWS_SOURCES_JSON=[{"name":"...","domain":"...","politicalLean":"center","rssUrl":"..."}]
 
 # Nightly Recap
 RECAP_MIN_VOTES=10
@@ -319,7 +325,11 @@ SCHEDULER_SECRET=your_secret
 1. **Get API Key**: Go to https://console.x.ai and create an account
 2. **Generate Key**: In the Console, create a new API key
 3. **Set Environment Variable**: `XAI_API_KEY=your_key_here`
-4. **Verify**: Run `npm run generate` in mock news mode to test the integration
+4. **Capabilities Used**: 
+   - Poll generation with grok-4.7
+   - Bias checking with low reasoning
+   - Web search for supplementing RSS feeds
+5. **Verify**: Run `npm run generate` in mock news mode to test the integration
 
 ---
 

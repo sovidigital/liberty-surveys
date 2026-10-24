@@ -18,8 +18,8 @@ A daily political polling platform at **libertysurveys.com** that sends subscrib
 
 - **Frontend/Backend**: Next.js 16 (App Router, TypeScript)
 - **Database**: Amazon Aurora DSQL (PostgreSQL-compatible, us-east-1)
-- **LLM**: xAI Grok API (grok-4.7 for poll generation and bias checking)
-- **News**: NewsAPI.org + RSS feeds from politically diverse sources
+- **LLM**: xAI Grok API (grok-4.7 for poll generation, bias checking, and web search)
+- **News**: RSS feeds from 22+ politically balanced sources + xAI web search
 - **Email**: Customer.io (Track API, Transactional API, Broadcasts)
 - **Hosting**: AWS Amplify (us-east-1)
 - **Styling**: Tailwind CSS
