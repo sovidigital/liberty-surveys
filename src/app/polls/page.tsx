@@ -94,9 +94,9 @@ export default async function PollsPage({
               <Image
                 src="/logo.png"
                 alt="Liberty Surveys"
-                width={160}
-                height={48}
-                className="h-10 w-auto"
+                width={200}
+                height={60}
+                className="h-14 w-auto"
               />
             </Link>
             <div className="space-x-6">

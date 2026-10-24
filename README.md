@@ -4,10 +4,13 @@ A daily political polling platform at **libertysurveys.com** that sends subscrib
 
 ## Features
 
+- **Automated Poll Generation**: Daily polls created automatically using xAI Grok API
 - **Email Subscription**: Double opt-in subscription flow
-- **Daily Polls**: Scheduled polls delivered at 7:00 AM ET every day
+- **Daily Polls**: Delivered at 7:00 AM ET every day with briefing content
+- **Three Perspectives**: Conservative, liberal, and centrist viewpoints on each topic
 - **One-Click Voting**: Tamper-resistant signed links for frictionless voting
-- **Results Display**: Real-time vote tallies and percentages
+- **Nightly Recap**: 8:00 PM ET email with poll results (percentages only)
+- **Results Display**: Real-time vote percentages (no raw counts for privacy)
 - **Poll Archive**: Browse historical polls and results
 - **Admin Dashboard**: Create, schedule, and manage polls
 
@@ -15,6 +18,8 @@ A daily political polling platform at **libertysurveys.com** that sends subscrib
 
 - **Frontend/Backend**: Next.js 16 (App Router, TypeScript)
 - **Database**: Amazon Aurora DSQL (PostgreSQL-compatible, us-east-1)
+- **LLM**: xAI Grok API (grok-4.7 for poll generation and bias checking)
+- **News**: NewsAPI.org + RSS feeds from politically diverse sources
 - **Email**: Customer.io (Track API, Transactional API, Broadcasts)
 - **Hosting**: AWS Amplify (us-east-1)
 - **Styling**: Tailwind CSS

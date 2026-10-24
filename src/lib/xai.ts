@@ -7,141 +7,128 @@ const USE_MOCK = process.env.USE_MOCK_LLM === 'true' || process.env.USE_MOCK_DB 
 // Configuration
 // ============================================================================
 
-const DEFAULT_MODEL = 'anthropic.claude-3-5-sonnet-20241022-v2:0';
-const BIAS_CHECK_MODEL = 'anthropic.claude-3-haiku-20240307-v1:0';
+const DEFAULT_MODEL = 'grok-4.7';
+const DEFAULT_BIAS_CHECK_MODEL = 'grok-4.7';
 
 export function getModelId(): string {
-  return process.env.BEDROCK_MODEL_ID || DEFAULT_MODEL;
+  return process.env.XAI_MODEL || DEFAULT_MODEL;
 }
 
 export function getBiasCheckModelId(): string {
-  return process.env.BEDROCK_BIAS_CHECK_MODEL_ID || BIAS_CHECK_MODEL;
+  return process.env.XAI_BIAS_CHECK_MODEL || DEFAULT_BIAS_CHECK_MODEL;
 }
 
 // ============================================================================
-// AWS Bedrock Client
+// xAI Responses API Client
 // ============================================================================
 
-interface BedrockMessage {
-  role: 'user' | 'assistant';
+interface ResponsesMessage {
+  role: 'user' | 'assistant' | 'system';
   content: string;
 }
 
-interface BedrockRequest {
-  anthropic_version: string;
-  max_tokens: number;
-  messages: BedrockMessage[];
-  system?: string;
+interface ResponsesRequest {
+  model: string;
+  input: ResponsesMessage[];
   temperature?: number;
+  max_output_tokens?: number;
+  reasoning_effort?: 'none' | 'low' | 'medium' | 'high';
+  tools?: Array<{
+    type: 'web_search' | 'x_search';
+    filters?: {
+      allowed_domains?: string[];
+      excluded_domains?: string[];
+    };
+  }>;
 }
 
-interface BedrockResponse {
-  content: Array<{ type: string; text: string }>;
-  stop_reason: string;
-  usage: { input_tokens: number; output_tokens: number };
+interface ResponsesOutput {
+  type: 'message';
+  content: Array<{ type: 'text'; text: string }>;
 }
 
-async function invokeBedrockModel(
+interface ResponsesResponse {
+  id: string;
+  output: ResponsesOutput[];
+  usage: {
+    input_tokens: number;
+    output_tokens: number;
+    reasoning_tokens?: number;
+  };
+}
+
+async function invokeXaiModel(
   modelId: string,
   systemPrompt: string,
   userPrompt: string,
-  options: { maxTokens?: number; temperature?: number } = {}
+  options: {
+    maxTokens?: number;
+    temperature?: number;
+    reasoningEffort?: 'none' | 'low' | 'medium' | 'high';
+    useWebSearch?: boolean;
+    webSearchDomains?: string[];
+  } = {}
 ): Promise<{ text: string; inputTokens: number; outputTokens: number }> {
-  const { maxTokens = 4096, temperature = 0.7 } = options;
-  
-  const region = process.env.AWS_REGION || 'us-east-1';
-  const endpoint = `https://bedrock-runtime.${region}.amazonaws.com/model/${modelId}/invoke`;
-  
-  const body: BedrockRequest = {
-    anthropic_version: 'bedrock-2023-05-31',
-    max_tokens: maxTokens,
+  const {
+    maxTokens = 4096,
+    temperature = 0.7,
+    reasoningEffort = 'low',
+    useWebSearch = false,
+    webSearchDomains,
+  } = options;
+
+  const apiKey = process.env.XAI_API_KEY;
+  if (!apiKey) {
+    throw new Error('XAI_API_KEY not configured');
+  }
+
+  const body: ResponsesRequest = {
+    model: modelId,
     temperature,
-    system: systemPrompt,
-    messages: [{ role: 'user', content: userPrompt }],
+    max_output_tokens: maxTokens,
+    reasoning_effort: reasoningEffort,
+    input: [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userPrompt },
+    ],
   };
-  
-  const bodyString = JSON.stringify(body);
-  
-  const accessKeyId = process.env.AWS_ACCESS_KEY_ID;
-  const secretAccessKey = process.env.AWS_SECRET_ACCESS_KEY;
-  const sessionToken = process.env.AWS_SESSION_TOKEN;
-  
-  if (!accessKeyId || !secretAccessKey) {
-    throw new Error('AWS credentials not configured');
+
+  if (useWebSearch) {
+    body.tools = [{
+      type: 'web_search',
+      ...(webSearchDomains && webSearchDomains.length > 0 && {
+        filters: { allowed_domains: webSearchDomains.slice(0, 5) },
+      }),
+    }];
   }
-  
-  const now = new Date();
-  const amzDate = now.toISOString().replace(/[:-]|\.\d{3}/g, '');
-  const dateStamp = amzDate.slice(0, 8);
-  
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    'X-Amz-Date': amzDate,
-    'Host': `bedrock-runtime.${region}.amazonaws.com`,
-  };
-  
-  if (sessionToken) {
-    headers['X-Amz-Security-Token'] = sessionToken;
-  }
-  
-  const canonicalUri = `/model/${encodeURIComponent(modelId)}/invoke`;
-  const canonicalQueryString = '';
-  const signedHeaders = Object.keys(headers).sort().map(k => k.toLowerCase()).join(';');
-  const canonicalHeaders = Object.keys(headers)
-    .sort()
-    .map(k => `${k.toLowerCase()}:${headers[k].trim()}`)
-    .join('\n') + '\n';
-  
-  const payloadHash = crypto.createHash('sha256').update(bodyString).digest('hex');
-  const canonicalRequest = [
-    'POST',
-    canonicalUri,
-    canonicalQueryString,
-    canonicalHeaders,
-    signedHeaders,
-    payloadHash,
-  ].join('\n');
-  
-  const algorithm = 'AWS4-HMAC-SHA256';
-  const credentialScope = `${dateStamp}/${region}/bedrock/aws4_request`;
-  const stringToSign = [
-    algorithm,
-    amzDate,
-    credentialScope,
-    crypto.createHash('sha256').update(canonicalRequest).digest('hex'),
-  ].join('\n');
-  
-  const getSignatureKey = (key: string, dateStamp: string, region: string, service: string) => {
-    const kDate = crypto.createHmac('sha256', `AWS4${key}`).update(dateStamp).digest();
-    const kRegion = crypto.createHmac('sha256', kDate).update(region).digest();
-    const kService = crypto.createHmac('sha256', kRegion).update(service).digest();
-    const kSigning = crypto.createHmac('sha256', kService).update('aws4_request').digest();
-    return kSigning;
-  };
-  
-  const signingKey = getSignatureKey(secretAccessKey, dateStamp, region, 'bedrock');
-  const signature = crypto.createHmac('sha256', signingKey).update(stringToSign).digest('hex');
-  
-  const authorizationHeader = `${algorithm} Credential=${accessKeyId}/${credentialScope}, SignedHeaders=${signedHeaders}, Signature=${signature}`;
-  headers['Authorization'] = authorizationHeader;
-  
-  const response = await fetch(endpoint, {
+
+  const response = await fetch('https://api.x.ai/v1/responses', {
     method: 'POST',
-    headers,
-    body: bodyString,
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify(body),
   });
-  
+
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(`Bedrock API error ${response.status}: ${errorText}`);
+    throw new Error(`xAI API error ${response.status}: ${errorText}`);
   }
-  
-  const data: BedrockResponse = await response.json();
-  
+
+  const data: ResponsesResponse = await response.json();
+
+  const textContent = data.output
+    .filter(o => o.type === 'message')
+    .flatMap(o => o.content)
+    .filter(c => c.type === 'text')
+    .map(c => c.text)
+    .join('');
+
   return {
-    text: data.content[0]?.text || '',
+    text: textContent,
     inputTokens: data.usage.input_tokens,
-    outputTokens: data.usage.output_tokens,
+    outputTokens: data.usage.output_tokens + (data.usage.reasoning_tokens || 0),
   };
 }
 
@@ -219,7 +206,7 @@ export async function generatePoll(
   const promptHash = crypto.createHash('sha256').update(userPrompt).digest('hex').slice(0, 16);
   
   if (USE_MOCK) {
-    console.log('[BEDROCK] Using mock poll generation');
+    console.log('[XAI] Using mock poll generation');
     return {
       poll: getMockGeneratedPoll(topic, articles),
       promptHash,
@@ -228,16 +215,16 @@ export async function generatePoll(
     };
   }
   
-  console.log(`[BEDROCK] Generating poll for topic: ${topic}`);
+  console.log(`[XAI] Generating poll for topic: ${topic}`);
   
-  const { text, inputTokens, outputTokens } = await invokeBedrockModel(
+  const { text, inputTokens, outputTokens } = await invokeXaiModel(
     getModelId(),
     POLL_GENERATION_SYSTEM_PROMPT,
     userPrompt,
-    { maxTokens: 4096, temperature: 0.7 }
+    { maxTokens: 4096, temperature: 0.7, reasoningEffort: 'low' }
   );
   
-  console.log(`[BEDROCK] Generation complete. Tokens: ${inputTokens} in, ${outputTokens} out`);
+  console.log(`[XAI] Generation complete. Tokens: ${inputTokens} in, ${outputTokens} out`);
   
   const jsonMatch = text.match(/\{[\s\S]*\}/);
   if (!jsonMatch) {
@@ -297,7 +284,7 @@ Centrist perspective: ${poll.briefing.centrist}
 Return ONLY the JSON analysis.`;
 
   if (USE_MOCK) {
-    console.log('[BEDROCK] Using mock bias check');
+    console.log('[XAI] Using mock bias check');
     return {
       questionBiasScore: 0.85,
       optionBalanceScore: 0.82,
@@ -308,13 +295,13 @@ Return ONLY the JSON analysis.`;
     };
   }
   
-  console.log('[BEDROCK] Running bias check...');
+  console.log('[XAI] Running bias check...');
   
-  const { text } = await invokeBedrockModel(
+  const { text } = await invokeXaiModel(
     getBiasCheckModelId(),
     BIAS_CHECK_SYSTEM_PROMPT,
     userPrompt,
-    { maxTokens: 1024, temperature: 0.3 }
+    { maxTokens: 1024, temperature: 0.3, reasoningEffort: 'none' }
   );
   
   const jsonMatch = text.match(/\{[\s\S]*\}/);
@@ -329,7 +316,7 @@ Return ONLY the JSON analysis.`;
     result.optionBalanceScore >= 0.5 &&
     result.perspectiveBalanceScore >= 0.5;
   
-  console.log(`[BEDROCK] Bias check complete. Overall score: ${result.overallScore}, passes: ${result.passesThreshold}`);
+  console.log(`[XAI] Bias check complete. Overall score: ${result.overallScore}, passes: ${result.passesThreshold}`);
   
   return result;
 }

@@ -157,12 +157,16 @@ The system clusters articles by topic and ranks them:
 
 Topics must have at least 4 articles with coverage from multiple political perspectives.
 
-### LLM Generation (Amazon Bedrock)
+### LLM Generation (xAI Grok API)
 
 **Model Configuration:**
-- Primary: Claude 3.5 Sonnet (`anthropic.claude-3-5-sonnet-20241022-v2:0`)
-- Bias Check: Claude 3 Haiku (`anthropic.claude-3-haiku-20240307-v1:0`)
-- Both configurable via environment variables
+- Primary: Grok 4.7 (`grok-4.7`) - 500k context, $2/1M input, $6/1M output
+- Bias Check: Grok 4.7 with low reasoning effort (same model, reduced tokens)
+- Both configurable via environment variables (`XAI_MODEL`, `XAI_BIAS_CHECK_MODEL`)
+- API endpoint: `https://api.x.ai/v1/responses` (OpenAI-compatible)
+
+**Optional: Live Search Enhancement**
+The xAI API supports built-in `web_search` and `x_search` tools that can supplement news gathering. However, every cited fact must still map to a real fetched article URL from NewsAPI or RSS feeds.
 
 **Generation Output (Structured JSON):**
 ```json
@@ -285,7 +289,7 @@ npm run recap
 | Service | Cost | Notes |
 |---------|------|-------|
 | NewsAPI.org | $449/month | Production plan (100k requests) |
-| Amazon Bedrock | $15-90/month | ~100-150k tokens/day |
+| xAI Grok API | $20-60/month | ~30 polls/month at $2/1M in, $6/1M out |
 | Aurora DSQL | Pay-per-use | Depends on traffic |
 | Amplify Hosting | Pay-per-use | Depends on traffic |
 
@@ -296,9 +300,10 @@ npm run recap
 NEWSAPI_API_KEY=your_api_key
 USE_MOCK_NEWS=false
 
-# Amazon Bedrock
-BEDROCK_MODEL_ID=anthropic.claude-3-5-sonnet-20241022-v2:0
-BEDROCK_BIAS_CHECK_MODEL_ID=anthropic.claude-3-haiku-20240307-v1:0
+# xAI Grok API
+XAI_API_KEY=your_xai_api_key
+XAI_MODEL=grok-4.7
+XAI_BIAS_CHECK_MODEL=grok-4.7
 USE_MOCK_LLM=false
 
 # Nightly Recap
@@ -308,6 +313,13 @@ CUSTOMERIO_RECAP_CAMPAIGN_ID=your_campaign_id
 # Scheduler Security
 SCHEDULER_SECRET=your_secret
 ```
+
+### xAI API Setup
+
+1. **Get API Key**: Go to https://console.x.ai and create an account
+2. **Generate Key**: In the Console, create a new API key
+3. **Set Environment Variable**: `XAI_API_KEY=your_key_here`
+4. **Verify**: Run `npm run generate` in mock news mode to test the integration
 
 ---
 

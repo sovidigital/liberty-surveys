@@ -5,36 +5,41 @@ import { SignupForm } from '@/components/SignupForm';
 export default function HomePage() {
   return (
     <main className="min-h-screen">
-      {/* Hero Section - Brand colors: charcoal/blue gradient */}
-      <section className="bg-gradient-to-b from-[#1a1a1a] to-[#0066b3] text-white">
-        <div className="max-w-6xl mx-auto px-4 py-20 sm:px-6 lg:px-8">
-          <nav className="flex justify-between items-center mb-16">
+      {/* Header - White bar for logo visibility */}
+      <nav className="bg-white shadow-sm">
+        <div className="max-w-6xl mx-auto px-4 py-4 sm:px-6 lg:px-8">
+          <div className="flex justify-between items-center">
             <Link href="/" className="flex items-center">
               <Image
                 src="/logo.png"
                 alt="Liberty Surveys"
                 width={200}
                 height={60}
-                className="h-12 w-auto"
+                className="h-14 w-auto"
                 priority
               />
             </Link>
             <div className="space-x-6">
-              <Link href="/polls" className="text-blue-200 hover:text-white transition-colors">
+              <Link href="/polls" className="text-gray-600 hover:text-[#1a1a1a] transition-colors">
                 Results
               </Link>
-              <Link href="/archive" className="text-blue-200 hover:text-white transition-colors">
+              <Link href="/archive" className="text-gray-600 hover:text-[#1a1a1a] transition-colors">
                 Archive
               </Link>
             </div>
-          </nav>
+          </div>
+        </div>
+      </nav>
 
+      {/* Hero Section - Brand colors: charcoal/blue gradient */}
+      <section className="bg-gradient-to-b from-[#1a1a1a] to-[#0066b3] text-white">
+        <div className="max-w-6xl mx-auto px-4 py-20 sm:px-6 lg:px-8">
           <div className="max-w-3xl mx-auto text-center">
             <h2 className="text-4xl sm:text-5xl font-bold mb-6">
               Your Voice Matters
             </h2>
             <p className="text-xl text-blue-100 mb-10">
-              Join thousands of Americans sharing their views on the issues that matter most.
+              Share your views on the issues that matter most.
               Receive a daily poll on current events and see how your opinions compare.
             </p>
             
@@ -127,13 +132,15 @@ export default function HomePage() {
         <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex flex-col md:flex-row justify-between items-center">
             <div className="mb-6 md:mb-0">
-              <Image
-                src="/logo.png"
-                alt="Liberty Surveys"
-                width={160}
-                height={48}
-                className="h-10 w-auto mb-2 brightness-0 invert"
-              />
+              <div className="bg-white rounded-lg px-4 py-2 mb-3 inline-block">
+                <Image
+                  src="/logo.png"
+                  alt="Liberty Surveys"
+                  width={180}
+                  height={54}
+                  className="h-12 w-auto"
+                />
+              </div>
               <p className="text-sm">Making your voice heard, one poll at a time.</p>
             </div>
             <div className="flex space-x-8">

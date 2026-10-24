@@ -96,16 +96,16 @@ export default async function PollPage({ params, searchParams }: Props) {
 
   return (
     <main className="min-h-screen bg-gray-50">
-      <nav className="bg-[#1a1a1a] shadow-sm">
+      <nav className="bg-white shadow-sm">
         <div className="max-w-6xl mx-auto px-4 py-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center">
             <Link href="/">
               <Image
                 src="/logo.png"
                 alt="Liberty Surveys"
-                width={160}
-                height={45}
-                className="h-10 w-auto"
+                width={200}
+                height={60}
+                className="h-14 w-auto"
                 priority
               />
             </Link>
@@ -113,7 +113,7 @@ export default async function PollPage({ params, searchParams }: Props) {
               <Link href="/polls" className="text-[#e31c23] font-medium">
                 Results
               </Link>
-              <Link href="/archive" className="text-gray-300 hover:text-white">
+              <Link href="/archive" className="text-gray-600 hover:text-[#1a1a1a]">
                 Archive
               </Link>
             </div>

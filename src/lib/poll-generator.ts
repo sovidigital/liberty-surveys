@@ -1,6 +1,6 @@
 import { query, transaction } from './db';
 import { fetchNews, clusterArticlesByTopic, fetchArticlesForTopic } from './news';
-import { generatePoll, checkPollBias, validateCitations, getModelId } from './bedrock';
+import { generatePoll, checkPollBias, validateCitations, getModelId } from './xai';
 import { generateId } from './ulid';
 import {
   GenerationRun,

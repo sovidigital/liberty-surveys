@@ -29,13 +29,15 @@ export function AdminNav() {
         <div className="flex items-center justify-between h-16">
           <div className="flex items-center space-x-8">
             <Link href="/admin" className="flex items-center space-x-3">
-              <Image
-                src="/logo.png"
-                alt="Liberty Surveys"
-                width={140}
-                height={40}
-                className="h-8 w-auto"
-              />
+              <div className="bg-white rounded px-3 py-1">
+                <Image
+                  src="/logo.png"
+                  alt="Liberty Surveys"
+                  width={160}
+                  height={48}
+                  className="h-10 w-auto"
+                />
+              </div>
               <span className="text-sm font-medium text-gray-400">Admin</span>
             </Link>
             <div className="hidden md:flex space-x-4">
