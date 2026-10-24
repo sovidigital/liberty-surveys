@@ -3,7 +3,8 @@ import Image from 'next/image';
 import { notFound } from 'next/navigation';
 import { query } from '@/lib/db';
 import { PollResults } from '@/components/PollResults';
-import { Poll, PollOption } from '@/types';
+import { PollBriefing } from '@/components/PollBriefing';
+import { PollOption, PollWithBriefing, PollSource } from '@/types';
 
 export const dynamic = 'force-dynamic';
 
@@ -12,10 +13,19 @@ interface Props {
   searchParams: Promise<{ status?: string; error?: string }>;
 }
 
-async function getPoll(id: string) {
+interface PollData {
+  poll: PollWithBriefing;
+  options: Array<PollOption & { vote_count: number }>;
+  totalVotes: number;
+  sources: PollSource[];
+}
+
+async function getPoll(id: string): Promise<PollData | null> {
   try {
-    const pollResult = await query<Poll>(
-      `SELECT id, question, status, published_at, closed_at, created_at
+    const pollResult = await query<PollWithBriefing>(
+      `SELECT id, question, status, published_at, closed_at, created_at,
+              briefing_background, briefing_conservative, briefing_liberal, briefing_centrist,
+              generation_run_id, is_auto_generated
        FROM polls
        WHERE id = $1 AND status IN ('active', 'closed')`,
       [id]
@@ -49,7 +59,16 @@ async function getPoll(id: string) {
 
     const totalVotes = options.reduce((sum, opt) => sum + opt.vote_count, 0);
 
-    return { poll, options, totalVotes };
+    const sourcesResult = await query<PollSource>(
+      `SELECT id, poll_id, source_name, source_url, article_title, article_snippet, 
+              political_lean, perspective_used, fetched_at, created_at
+       FROM poll_sources
+       WHERE poll_id = $1
+       ORDER BY created_at`,
+      [id]
+    );
+
+    return { poll, options, totalVotes, sources: sourcesResult.rows };
   } catch (error) {
     console.error('Error fetching poll:', error);
     return null;
@@ -131,6 +150,19 @@ export default async function PollPage({ params, searchParams }: Props) {
             ← Back to Archive
           </Link>
         </div>
+
+        {(data.poll.briefing_background || data.poll.briefing_conservative) && (
+          <div className="mb-8">
+            <h2 className="text-xl font-semibold text-gray-900 mb-4">Understanding the Issue</h2>
+            <PollBriefing
+              background={data.poll.briefing_background}
+              conservative={data.poll.briefing_conservative}
+              liberal={data.poll.briefing_liberal}
+              centrist={data.poll.briefing_centrist}
+              sources={data.sources}
+            />
+          </div>
+        )}
 
         <div className="bg-white rounded-xl shadow-sm p-8 border border-gray-200">
           <p className="text-sm text-gray-500 mb-4">

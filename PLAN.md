@@ -117,6 +117,200 @@ Click Unsubscribe → Verify Token → Update Status → Confirmation Page
 
 ---
 
+## Automated Poll Generation (Core MVP Feature)
+
+Liberty Surveys uses a fully automated pipeline to generate daily polls with no human intervention required. The system fetches current news, selects the best political topic, generates a balanced poll question with multiple perspectives, and validates the output before publishing.
+
+### Pipeline Overview
+
+```
+5:00 AM ET: News Fetching → Topic Selection → Poll Generation → Bias Check → Save to DB
+7:00 AM ET: Publish Poll → Trigger Daily Email Broadcast
+8:00 PM ET: Send Nightly Recap Email with Results (percentages only)
+```
+
+### News Fetching
+
+**Primary Source: NewsAPI.org**
+- Aggregates articles from 80,000+ news sources
+- Fetches recent articles (last 24 hours) matching political/policy keywords
+- Production plan: $449/month for 100k requests
+
+**Supplementary: RSS Feeds**
+- Direct feeds from politically diverse outlets
+- Left-leaning: CNN, NYT, The Guardian, NPR, Washington Post
+- Center: AP, Reuters, BBC, PBS, The Hill, Axios
+- Right-leaning: Fox News, WSJ, National Review, NY Post, The Federalist
+
+**Configuration:**
+- `NEWSAPI_API_KEY` - NewsAPI.org API key
+- `USE_MOCK_NEWS=true` - Use mock data for local development
+
+### Topic Selection
+
+The system clusters articles by topic and ranks them:
+
+1. **Prominence Score**: Number of articles × number of unique sources
+2. **Coverage Breadth**: Articles from left, center, AND right perspectives (minimum 2 of 3)
+3. **Debatability Score**: Topics with genuine disagreement across perspectives
+4. **Recent Topic Avoidance**: Skip topics covered in polls from the last 7 days
+
+Topics must have at least 4 articles with coverage from multiple political perspectives.
+
+### LLM Generation (Amazon Bedrock)
+
+**Model Configuration:**
+- Primary: Claude 3.5 Sonnet (`anthropic.claude-3-5-sonnet-20241022-v2:0`)
+- Bias Check: Claude 3 Haiku (`anthropic.claude-3-haiku-20240307-v1:0`)
+- Both configurable via environment variables
+
+**Generation Output (Structured JSON):**
+```json
+{
+  "question": "Should Congress pass the proposed infrastructure bill?",
+  "options": [
+    {"text": "Yes, pass it as proposed"},
+    {"text": "Yes, but with modifications"},
+    {"text": "No, reject the proposal"},
+    {"text": "Undecided / Need more information"}
+  ],
+  "briefing": {
+    "background": "Neutral factual context (2-3 sentences)",
+    "conservative": "Conservative perspective (2-3 sentences)",
+    "liberal": "Liberal perspective (2-3 sentences)",
+    "centrist": "Centrist/independent perspective (2-3 sentences)"
+  },
+  "sources": [
+    {
+      "sourceName": "Associated Press",
+      "sourceUrl": "https://...",
+      "articleTitle": "...",
+      "snippet": "Relevant quote from article",
+      "politicalLean": "center",
+      "usedForPerspective": "background"
+    }
+  ],
+  "topicSummary": "Why this topic was selected"
+}
+```
+
+**Requirements:**
+- 2-4 balanced, non-leading answer options
+- Every factual claim must cite a source article
+- Sources must match URLs from fetched articles
+
+### Quality Guardrails
+
+**1. Citation Validation**
+- Every source URL must exist in fetched articles
+- Minimum 50% valid citations required
+- Regenerate if validation fails
+
+**2. Bias Check (Second LLM Pass)**
+- Question bias score (0-1): Is wording neutral?
+- Option balance score (0-1): Are options fair?
+- Perspective balance score (0-1): Are all views represented?
+- Overall threshold: ≥0.7 with no dimension below 0.5
+
+**3. Retry Logic**
+- Up to 3 generation attempts per run
+- Each retry uses the same topic with fresh generation
+
+**4. Fallback System**
+- If all retries fail, use an evergreen backup poll
+- Pre-written polls stored in `evergreen_polls` table
+- Covers timeless political topics (term limits, voting, etc.)
+- Marked as fallback in logs
+
+**5. Logging**
+- Every run logged to `generation_runs` table
+- Includes: articles fetched, topic selected, LLM inputs/outputs
+- Bias scores, retry count, success/failure status
+
+### Nightly Recap Email
+
+At 8:00 PM ET (configurable), send results summary to all active subscribers.
+
+**Content:**
+- Poll question
+- Percentage for each option (rounded, no vote counts)
+- Visual percentage bars
+- Brief excerpt from background briefing
+- Link to full results page
+
+**Skip Conditions:**
+- No active poll for today
+- Recap already sent for this poll
+- Fewer than minimum votes (default: 10, configurable via `RECAP_MIN_VOTES`)
+
+### Schedule Configuration (EventBridge Scheduler)
+
+| Job | Time | Cron Expression | Timezone |
+|-----|------|-----------------|----------|
+| Poll Generation | 5:00 AM | `cron(0 5 * * ? *)` | America/New_York |
+| Daily Poll Send | 7:00 AM | `cron(0 7 * * ? *)` | America/New_York |
+| Nightly Recap | 8:00 PM | `cron(0 20 * * ? *)` | America/New_York |
+| Close Previous Poll | 7:00 AM | (same job as send) | America/New_York |
+
+### API Endpoints
+
+| Endpoint | Method | Purpose | Auth |
+|----------|--------|---------|------|
+| `/api/admin/generate` | POST | Trigger poll generation | Admin or Scheduler |
+| `/api/admin/recap` | POST | Trigger recap email | Admin or Scheduler |
+| `/api/admin/recap` | GET | Preview recap content | Admin |
+
+**Scheduler Authentication:**
+- Set `x-scheduled-job: true` header
+- Include `x-scheduler-secret` header matching `SCHEDULER_SECRET` env var
+
+### Manual Execution
+
+```bash
+# Generate a poll (mock mode with USE_MOCK_DB=true)
+npm run generate
+
+# Force new generation even if today's poll exists
+npm run generate:force
+
+# Preview recap email content
+npm run recap:preview
+
+# Send recap email
+npm run recap
+```
+
+### Estimated Monthly Costs
+
+| Service | Cost | Notes |
+|---------|------|-------|
+| NewsAPI.org | $449/month | Production plan (100k requests) |
+| Amazon Bedrock | $15-90/month | ~100-150k tokens/day |
+| Aurora DSQL | Pay-per-use | Depends on traffic |
+| Amplify Hosting | Pay-per-use | Depends on traffic |
+
+### Environment Variables
+
+```bash
+# News API
+NEWSAPI_API_KEY=your_api_key
+USE_MOCK_NEWS=false
+
+# Amazon Bedrock
+BEDROCK_MODEL_ID=anthropic.claude-3-5-sonnet-20241022-v2:0
+BEDROCK_BIAS_CHECK_MODEL_ID=anthropic.claude-3-haiku-20240307-v1:0
+USE_MOCK_LLM=false
+
+# Nightly Recap
+RECAP_MIN_VOTES=10
+CUSTOMERIO_RECAP_CAMPAIGN_ID=your_campaign_id
+
+# Scheduler Security
+SCHEDULER_SECRET=your_secret
+```
+
+---
+
 ## Data Model (Aurora DSQL)
 
 ### Design Considerations for DSQL
@@ -204,6 +398,105 @@ CREATE TABLE admin_users (
   password_hash VARCHAR(255) NOT NULL,
   created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
 );
+```
+
+#### `poll_sources` (Automated Generation)
+```sql
+CREATE TABLE poll_sources (
+  id VARCHAR(26) PRIMARY KEY,              -- ULID
+  poll_id VARCHAR(26) NOT NULL,            -- references polls(id)
+  source_name VARCHAR(255) NOT NULL,       -- e.g. "Associated Press"
+  source_url TEXT NOT NULL,                -- article URL
+  article_title TEXT,
+  article_snippet TEXT,                    -- relevant quote
+  political_lean VARCHAR(20),              -- left, center-left, center, center-right, right
+  perspective_used VARCHAR(20),            -- background, conservative, liberal, centrist
+  fetched_at TIMESTAMP WITH TIME ZONE,
+  created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_poll_sources_poll_id ON poll_sources(poll_id);
+```
+
+#### `generation_runs` (Automated Generation Logs)
+```sql
+CREATE TABLE generation_runs (
+  id VARCHAR(26) PRIMARY KEY,              -- ULID
+  run_date DATE NOT NULL,
+  status VARCHAR(20) NOT NULL,             -- pending, success, failed, fallback
+  selected_topic TEXT,
+  topic_reason TEXT,
+  articles_fetched_count INT,
+  articles_used_count INT,
+  generated_poll_id VARCHAR(26),           -- references polls(id)
+  model_used VARCHAR(100),
+  bias_score DECIMAL(5,2),
+  balance_score DECIMAL(5,2),
+  retry_count INT DEFAULT 0,
+  used_fallback BOOLEAN DEFAULT FALSE,
+  fallback_reason TEXT,
+  error_message TEXT,
+  raw_llm_input TEXT,                      -- for debugging
+  raw_llm_output TEXT,                     -- for debugging
+  started_at TIMESTAMP WITH TIME ZONE,
+  completed_at TIMESTAMP WITH TIME ZONE,
+  created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_generation_runs_date ON generation_runs(run_date);
+CREATE INDEX idx_generation_runs_status ON generation_runs(status);
+```
+
+#### `evergreen_polls` (Fallback Content)
+```sql
+CREATE TABLE evergreen_polls (
+  id VARCHAR(26) PRIMARY KEY,              -- ULID
+  question TEXT NOT NULL,
+  options_json TEXT NOT NULL,              -- JSON array of options
+  briefing_background TEXT,
+  briefing_conservative TEXT,
+  briefing_liberal TEXT,
+  briefing_centrist TEXT,
+  category VARCHAR(50),                    -- e.g. "governance", "economy"
+  last_used_at TIMESTAMP WITH TIME ZONE,
+  use_count INT DEFAULT 0,
+  is_active BOOLEAN DEFAULT TRUE,
+  created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+```
+
+#### `recap_sends` (Nightly Recap Logs)
+```sql
+CREATE TABLE recap_sends (
+  id VARCHAR(26) PRIMARY KEY,              -- ULID
+  poll_id VARCHAR(26) NOT NULL,            -- references polls(id)
+  send_date DATE NOT NULL,
+  status VARCHAR(20) NOT NULL,             -- pending, sent, skipped, failed
+  total_votes INT NOT NULL,
+  vote_threshold INT NOT NULL,
+  results_snapshot_json TEXT NOT NULL,     -- JSON with percentages
+  subscribers_sent_to INT,
+  skipped BOOLEAN DEFAULT FALSE,
+  skip_reason TEXT,
+  sent_at TIMESTAMP WITH TIME ZONE,
+  created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_recap_sends_poll_id ON recap_sends(poll_id);
+CREATE INDEX idx_recap_sends_date ON recap_sends(send_date);
+```
+
+### Polls Table Extensions (Automated Generation)
+
+The `polls` table includes these additional columns for automated generation:
+
+```sql
+ALTER TABLE polls ADD COLUMN briefing_background TEXT;
+ALTER TABLE polls ADD COLUMN briefing_conservative TEXT;
+ALTER TABLE polls ADD COLUMN briefing_liberal TEXT;
+ALTER TABLE polls ADD COLUMN briefing_centrist TEXT;
+ALTER TABLE polls ADD COLUMN generation_run_id VARCHAR(26);
+ALTER TABLE polls ADD COLUMN is_auto_generated BOOLEAN DEFAULT FALSE;
 ```
 
 ### Data Integrity Notes
@@ -309,18 +602,32 @@ The owner needs to complete these steps in Customer.io to set up the "Liberty Su
   - Body: Include `{{ trigger.confirm_url }}` link
   - Note the message ID → set as `CUSTOMERIO_CONFIRM_MESSAGE_ID`
 
-#### 5. Create API-Triggered Broadcast
+#### 5. Create Daily Poll Broadcast
 - [ ] Go to **Campaigns > Broadcasts**
 - [ ] Create new API-triggered broadcast named "Daily Poll"
 - [ ] Set audience: Segment where `subscription_status = active`
 - [ ] Design email template:
   - Subject: "Today's Poll: {{ trigger.poll_question | truncate: 50 }}"
-  - Body: Include poll question and vote buttons using `trigger.options` array
+  - Body: Include briefing background, poll question, and vote buttons
   - Each button links to option's `vote_url`
+  - Include the three perspectives (conservative, liberal, centrist)
+  - Include source citations
   - Include unsubscribe link in footer
 - [ ] Note the campaign ID → set as `CUSTOMERIO_BROADCAST_CAMPAIGN_ID`
 
-#### 6. Email Template Variables
+#### 6. Create Nightly Recap Broadcast
+- [ ] Go to **Campaigns > Broadcasts**
+- [ ] Create new API-triggered broadcast named "Nightly Recap"
+- [ ] Set audience: Segment where `subscription_status = active`
+- [ ] Design email template:
+  - Subject: "Today's Results: {{ trigger.poll_question | truncate: 40 }}"
+  - Body: Show poll question and percentage bars
+  - Display percentages (NOT vote counts) for each option
+  - Include brief excerpt from briefing
+  - Link to full results page
+- [ ] Note the campaign ID → set as `CUSTOMERIO_RECAP_CAMPAIGN_ID`
+
+#### 7. Email Template Variables
 
 **Confirmation Email:**
 ```liquid
@@ -330,13 +637,39 @@ The owner needs to complete these steps in Customer.io to set up the "Liberty Su
 
 **Daily Poll Broadcast:**
 ```liquid
-{{ trigger.poll_id }}            - Poll identifier
-{{ trigger.poll_question }}      - The poll question
-{{ trigger.options }}            - Array of vote options
-{{ trigger.options[0].text }}    - Option text
-{{ trigger.options[0].vote_url }} - Signed vote URL
-{{ trigger.results_url }}        - Link to results page
-{{ customer.unsubscribe_url }}   - Unsubscribe link (auto-generated)
+{{ trigger.poll_id }}              - Poll identifier
+{{ trigger.poll_question }}        - The poll question
+{{ trigger.options }}              - Array of vote options
+{{ trigger.options[0].text }}      - Option text
+{{ trigger.options[0].vote_url }}  - Signed vote URL
+{{ trigger.results_url }}          - Link to results page
+
+{# Briefing content (from automated generation) #}
+{{ trigger.briefing_background }}    - Neutral background
+{{ trigger.briefing_conservative }}  - Conservative perspective
+{{ trigger.briefing_liberal }}       - Liberal perspective
+{{ trigger.briefing_centrist }}      - Centrist perspective
+
+{# Source citations #}
+{{ trigger.sources }}                - Array of cited sources
+{{ trigger.sources[0].name }}        - Source outlet name
+{{ trigger.sources[0].url }}         - Article URL
+{{ trigger.sources[0].title }}       - Article title
+
+{{ customer.unsubscribe_url }}     - Unsubscribe link (auto-generated)
+```
+
+**Nightly Recap Broadcast:**
+```liquid
+{{ trigger.poll_id }}              - Poll identifier
+{{ trigger.poll_question }}        - The poll question
+{{ trigger.results }}              - Array of results (sorted by display order)
+{{ trigger.results[0].text }}      - Option text
+{{ trigger.results[0].percentage }} - Percentage (integer, e.g. 42)
+{{ trigger.results[0].bar_width }}  - Same as percentage (for CSS width)
+{{ trigger.briefing_excerpt }}     - Short excerpt from background
+{{ trigger.results_url }}          - Link to full results page
+{{ customer.unsubscribe_url }}     - Unsubscribe link (auto-generated)
 ```
 
 ---
@@ -356,7 +689,7 @@ The owner needs to complete these steps in Customer.io to set up the "Liberty Su
    - System queues for broadcast
 
 3. **Automatic Publishing:**
-   - Cron job or scheduled function runs at send time (e.g., 8 AM ET)
+   - Cron job or scheduled function runs at send time (7:00 AM ET)
    - Finds polls scheduled for today
    - Triggers Customer.io broadcast
    - Updates poll status to "active"

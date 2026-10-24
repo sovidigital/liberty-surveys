@@ -7,7 +7,7 @@ interface PollResultsProps {
   options: Array<PollOption & { vote_count: number }>;
   totalVotes: number;
   status: 'active' | 'closed';
-  showPercentages?: boolean;
+  showVoteCounts?: boolean;
 }
 
 export function PollResults({
@@ -15,7 +15,7 @@ export function PollResults({
   options,
   totalVotes,
   status,
-  showPercentages = true,
+  showVoteCounts = false,
 }: PollResultsProps) {
   const sortedOptions = [...options].sort((a, b) => b.vote_count - a.vote_count);
 
@@ -46,14 +46,14 @@ export function PollResults({
             <div key={option.id} className="relative">
               <div className="flex justify-between items-center mb-1">
                 <span className="text-gray-800 font-medium">{option.option_text}</span>
-                <span className="text-gray-600 text-sm">
-                  {showPercentages ? `${percentage}%` : ''} ({option.vote_count.toLocaleString()} votes)
+                <span className="text-gray-600 text-sm font-semibold">
+                  {percentage}%
                 </span>
               </div>
               <div className="h-8 bg-gray-200 rounded-full overflow-hidden">
                 <div
                   className={`h-full ${barColor} rounded-full transition-all duration-500 ease-out`}
-                  style={{ width: `${percentage}%` }}
+                  style={{ width: `${Math.max(percentage, 2)}%` }}
                 />
               </div>
             </div>
@@ -62,7 +62,11 @@ export function PollResults({
       </div>
 
       <div className="mt-6 flex justify-between items-center text-sm text-gray-600">
-        <span>Total votes: {totalVotes.toLocaleString()}</span>
+        {showVoteCounts ? (
+          <span>Total responses: {totalVotes.toLocaleString()}</span>
+        ) : (
+          <span>{totalVotes > 0 ? 'Results based on subscriber responses' : 'No votes yet'}</span>
+        )}
         <span className={`px-3 py-1 rounded-full text-xs font-medium ${
           status === 'active' 
             ? 'bg-[#0066b3]/10 text-[#0066b3]' 

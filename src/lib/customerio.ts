@@ -176,12 +176,107 @@ export async function triggerBroadcast(
   );
 }
 
+// ============================================================================
+// Daily Poll Broadcast (with briefing)
+// ============================================================================
+
+export interface PollBroadcastOption {
+  id: string;
+  text: string;
+  vote_url: string;
+}
+
+export interface PollBroadcastData {
+  poll_id: string;
+  poll_question: string;
+  options: PollBroadcastOption[];
+  results_url: string;
+  briefing_background?: string;
+  briefing_conservative?: string;
+  briefing_liberal?: string;
+  briefing_centrist?: string;
+  sources?: Array<{
+    name: string;
+    url: string;
+    title: string;
+  }>;
+}
+
+export async function triggerPollBroadcast(
+  data: PollBroadcastData
+): Promise<{ subscriberCount: number }> {
+  const environmentId = process.env.CUSTOMERIO_ENVIRONMENT_ID;
+  const campaignId = process.env.CUSTOMERIO_BROADCAST_CAMPAIGN_ID;
+  
+  if (!environmentId || !campaignId) {
+    console.warn('[Customer.io] Broadcast not configured, skipping');
+    return { subscriberCount: 0 };
+  }
+  
+  const config = getConfig();
+  
+  if (config.siteId === 'mock') {
+    console.log('[Customer.io MOCK] Poll broadcast triggered:', data);
+    return { subscriberCount: 100 };
+  }
+  
+  await triggerBroadcast(environmentId, {
+    campaignId: parseInt(campaignId, 10),
+    data: data as unknown as Record<string, unknown>,
+  });
+  
+  return { subscriberCount: -1 };
+}
+
+// ============================================================================
+// Nightly Recap Broadcast
+// ============================================================================
+
+export interface RecapBroadcastData {
+  poll_id: string;
+  poll_question: string;
+  results: Array<{
+    text: string;
+    percentage: number;
+    bar_width: number;
+  }>;
+  briefing_excerpt?: string;
+  results_url: string;
+}
+
+export async function triggerRecapBroadcast(
+  campaignId: string,
+  data: RecapBroadcastData
+): Promise<{ subscriberCount: number }> {
+  const environmentId = process.env.CUSTOMERIO_ENVIRONMENT_ID;
+  
+  if (!environmentId) {
+    throw new Error('CUSTOMERIO_ENVIRONMENT_ID not configured');
+  }
+  
+  const config = getConfig();
+  
+  if (config.siteId === 'mock') {
+    console.log('[Customer.io MOCK] Recap broadcast triggered:', data);
+    return { subscriberCount: 100 };
+  }
+  
+  await triggerBroadcast(environmentId, {
+    campaignId: parseInt(campaignId, 10),
+    data: data as unknown as Record<string, unknown>,
+  });
+  
+  return { subscriberCount: -1 };
+}
+
 export const customerio = {
   identifySubscriber,
   trackEvent,
   deleteSubscriber,
   sendTransactionalEmail,
   triggerBroadcast,
+  triggerPollBroadcast,
+  triggerRecapBroadcast,
 };
 
 export default customerio;

@@ -23,7 +23,7 @@ export default function CreatePollPage() {
   const [error, setError] = useState('');
 
   function addOption() {
-    if (options.length >= 6) return;
+    if (options.length >= 4) return;
     setOptions([...options, { id: String(Date.now()), text: '' }]);
   }
 
@@ -127,7 +127,7 @@ export default function CreatePollPage() {
 
         <div className="mb-6">
           <label className="block text-sm font-medium text-gray-700 mb-2">
-            Answer Options ({options.length}/6)
+            Answer Options ({options.length}/4)
           </label>
           <div className="space-y-3">
             {options.map((option, index) => (
@@ -153,7 +153,7 @@ export default function CreatePollPage() {
               </div>
             ))}
           </div>
-          {options.length < 6 && (
+          {options.length < 4 && (
             <button
               type="button"
               onClick={addOption}
