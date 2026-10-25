@@ -153,6 +153,9 @@ export default function HomePage() {
               <Link href="/privacy" className="hover:text-white transition-colors">
                 Privacy
               </Link>
+              <Link href="/terms" className="hover:text-white transition-colors">
+                Terms
+              </Link>
             </div>
           </div>
           <div className="mt-8 pt-8 border-t border-gray-800 text-center text-sm">
