@@ -3,7 +3,10 @@ import Image from 'next/image';
 import { query } from '@/lib/db';
 import { PollResults } from '@/components/PollResults';
 import { PollBriefing } from '@/components/PollBriefing';
+import { AdUnit } from '@/components/AdUnit';
 import { PollOption, PollWithBriefing, PollSource } from '@/types';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { faCheckToSlot } from '@fortawesome/free-solid-svg-icons';
 
 export const dynamic = 'force-dynamic';
 
@@ -168,6 +171,12 @@ export default async function PollsPage({
               />
             </div>
 
+            {/* Ad Unit - After poll results */}
+            <div className="mt-8">
+              {/* Ad slot ID placeholder: Replace with real slot from AdSense console */}
+              <AdUnit slot={process.env.NEXT_PUBLIC_ADSENSE_SLOT_POLL} format="auto" className="min-h-[250px]" />
+            </div>
+
             <div className="mt-8 text-center">
               <Link
                 href="/archive"
@@ -179,7 +188,9 @@ export default async function PollsPage({
           </>
         ) : (
           <div className="text-center py-16">
-            <div className="text-6xl mb-4">🗳️</div>
+            <div className="w-20 h-20 bg-[#0066b3]/10 rounded-full flex items-center justify-center mx-auto mb-6">
+              <FontAwesomeIcon icon={faCheckToSlot} className="text-4xl text-[#0066b3]" />
+            </div>
             <h1 className="text-2xl font-bold text-gray-900 mb-4">
               No Active Polls
             </h1>

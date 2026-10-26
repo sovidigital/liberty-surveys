@@ -1,6 +1,9 @@
 import Link from 'next/link';
 import Image from 'next/image';
 import { SignupForm } from '@/components/SignupForm';
+import { AdUnit } from '@/components/AdUnit';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { faEnvelope, faCheckToSlot, faChartBar } from '@fortawesome/free-solid-svg-icons';
 
 export default function HomePage() {
   return (
@@ -64,7 +67,7 @@ export default function HomePage() {
           <div className="grid md:grid-cols-3 gap-8">
             <div className="text-center p-6">
               <div className="w-16 h-16 bg-[#0066b3]/10 rounded-full flex items-center justify-center mx-auto mb-4">
-                <span className="text-2xl">📧</span>
+                <FontAwesomeIcon icon={faEnvelope} className="text-2xl text-[#0066b3]" />
               </div>
               <h4 className="text-xl font-semibold text-[#1a1a1a] mb-2">
                 Daily Email
@@ -76,7 +79,7 @@ export default function HomePage() {
 
             <div className="text-center p-6">
               <div className="w-16 h-16 bg-[#e31c23]/10 rounded-full flex items-center justify-center mx-auto mb-4">
-                <span className="text-2xl">🗳️</span>
+                <FontAwesomeIcon icon={faCheckToSlot} className="text-2xl text-[#e31c23]" />
               </div>
               <h4 className="text-xl font-semibold text-[#1a1a1a] mb-2">
                 One-Click Vote
@@ -88,7 +91,7 @@ export default function HomePage() {
 
             <div className="text-center p-6">
               <div className="w-16 h-16 bg-[#0066b3]/10 rounded-full flex items-center justify-center mx-auto mb-4">
-                <span className="text-2xl">📊</span>
+                <FontAwesomeIcon icon={faChartBar} className="text-2xl text-[#0066b3]" />
               </div>
               <h4 className="text-xl font-semibold text-[#1a1a1a] mb-2">
                 See Results
@@ -98,6 +101,14 @@ export default function HomePage() {
               </p>
             </div>
           </div>
+        </div>
+      </section>
+
+      {/* Ad Unit - Between sections */}
+      <section className="py-4 bg-gray-100">
+        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
+          {/* Ad slot ID placeholder: Replace with real slot from AdSense console */}
+          <AdUnit slot={process.env.NEXT_PUBLIC_ADSENSE_SLOT_HOME} format="horizontal" className="min-h-[90px]" />
         </div>
       </section>
 

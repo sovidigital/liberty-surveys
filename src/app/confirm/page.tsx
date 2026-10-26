@@ -1,16 +1,35 @@
 import Link from 'next/link';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { 
+  faCircleCheck, 
+  faCircleXmark, 
+  faClock, 
+  faCircleQuestion, 
+  faTriangleExclamation,
+  faEnvelope 
+} from '@fortawesome/free-solid-svg-icons';
+import { IconDefinition } from '@fortawesome/fontawesome-svg-core';
 
 interface Props {
   searchParams: Promise<{ status?: string; error?: string }>;
 }
 
+interface ContentConfig {
+  icon: IconDefinition;
+  iconBg: string;
+  iconColor: string;
+  title: string;
+  message: string;
+  showSubscribe: boolean;
+}
+
 export default async function ConfirmPage({ searchParams }: Props) {
   const { status, error } = await searchParams;
 
-  const getContent = () => {
+  const getContent = (): ContentConfig => {
     if (status === 'success') {
       return {
-        icon: '✓',
+        icon: faCircleCheck,
         iconBg: 'bg-green-100',
         iconColor: 'text-green-600',
         title: 'Subscription Confirmed!',
@@ -21,7 +40,7 @@ export default async function ConfirmPage({ searchParams }: Props) {
 
     if (status === 'already_confirmed') {
       return {
-        icon: '✓',
+        icon: faCircleCheck,
         iconBg: 'bg-blue-100',
         iconColor: 'text-blue-600',
         title: 'Already Confirmed',
@@ -32,7 +51,7 @@ export default async function ConfirmPage({ searchParams }: Props) {
 
     if (error === 'invalid' || error === 'invalid_token') {
       return {
-        icon: '✗',
+        icon: faCircleXmark,
         iconBg: 'bg-red-100',
         iconColor: 'text-red-600',
         title: 'Invalid Link',
@@ -43,7 +62,7 @@ export default async function ConfirmPage({ searchParams }: Props) {
 
     if (error === 'expired') {
       return {
-        icon: '⏰',
+        icon: faClock,
         iconBg: 'bg-yellow-100',
         iconColor: 'text-yellow-600',
         title: 'Link Expired',
@@ -54,7 +73,7 @@ export default async function ConfirmPage({ searchParams }: Props) {
 
     if (error === 'not_found') {
       return {
-        icon: '?',
+        icon: faCircleQuestion,
         iconBg: 'bg-gray-100',
         iconColor: 'text-gray-600',
         title: 'Not Found',
@@ -65,7 +84,7 @@ export default async function ConfirmPage({ searchParams }: Props) {
 
     if (error === 'server') {
       return {
-        icon: '!',
+        icon: faTriangleExclamation,
         iconBg: 'bg-red-100',
         iconColor: 'text-red-600',
         title: 'Something Went Wrong',
@@ -75,7 +94,7 @@ export default async function ConfirmPage({ searchParams }: Props) {
     }
 
     return {
-      icon: '📧',
+      icon: faEnvelope,
       iconBg: 'bg-blue-100',
       iconColor: 'text-blue-600',
       title: 'Confirm Your Email',
@@ -90,7 +109,7 @@ export default async function ConfirmPage({ searchParams }: Props) {
     <main className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
       <div className="max-w-md w-full text-center">
         <div className={`w-20 h-20 ${content.iconBg} rounded-full flex items-center justify-center mx-auto mb-6`}>
-          <span className={`text-4xl ${content.iconColor}`}>{content.icon}</span>
+          <FontAwesomeIcon icon={content.icon} className={`text-4xl ${content.iconColor}`} />
         </div>
         
         <h1 className="text-2xl font-bold text-gray-900 mb-4">

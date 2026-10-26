@@ -4,6 +4,7 @@ import { notFound } from 'next/navigation';
 import { query } from '@/lib/db';
 import { PollResults } from '@/components/PollResults';
 import { PollBriefing } from '@/components/PollBriefing';
+import { AdUnit } from '@/components/AdUnit';
 import { PollOption, PollWithBriefing, PollSource } from '@/types';
 
 export const dynamic = 'force-dynamic';
@@ -175,6 +176,12 @@ export default async function PollPage({ params, searchParams }: Props) {
             totalVotes={data.totalVotes}
             status={data.poll.status as 'active' | 'closed'}
           />
+        </div>
+
+        {/* Ad Unit - After poll results */}
+        <div className="mt-8">
+          {/* Ad slot ID placeholder: Replace with real slot from AdSense console */}
+          <AdUnit slot={process.env.NEXT_PUBLIC_ADSENSE_SLOT_POLL} format="auto" className="min-h-[250px]" />
         </div>
 
         <div className="mt-8 flex justify-between items-center">

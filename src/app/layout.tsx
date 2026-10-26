@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { FontAwesomeConfig } from "@/components/FontAwesomeConfig";
+import { AdSenseScript } from "@/components/AdSenseScript";
 
 export const metadata: Metadata = {
   title: "Liberty Surveys - Daily Political Polls",
@@ -14,7 +16,11 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
+      <head>
+        <AdSenseScript />
+      </head>
       <body className="antialiased bg-gray-50 min-h-screen">
+        <FontAwesomeConfig />
         {children}
       </body>
     </html>

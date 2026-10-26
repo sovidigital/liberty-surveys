@@ -2,7 +2,10 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { query } from '@/lib/db';
 import { PollCard } from '@/components/PollCard';
+import { AdUnit } from '@/components/AdUnit';
 import { Poll, PollOption } from '@/types';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { faInbox } from '@fortawesome/free-solid-svg-icons';
 
 export const dynamic = 'force-dynamic';
 
@@ -112,14 +115,27 @@ export default async function ArchivePage() {
         </p>
 
         {polls.length > 0 ? (
-          <div className="grid gap-4">
-            {polls.map(poll => (
-              <PollCard key={poll.id} poll={poll} />
-            ))}
-          </div>
+          <>
+            <div className="grid gap-4">
+              {polls.map((poll, index) => (
+                <div key={poll.id}>
+                  <PollCard poll={poll} />
+                  {/* Ad unit after every 5th poll */}
+                  {(index + 1) % 5 === 0 && index < polls.length - 1 && (
+                    <div className="my-4">
+                      {/* Ad slot ID placeholder: Replace with real slot from AdSense console */}
+                      <AdUnit slot={process.env.NEXT_PUBLIC_ADSENSE_SLOT_ARCHIVE} format="fluid" className="min-h-[100px]" />
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </>
         ) : (
           <div className="text-center py-16 bg-white rounded-xl border border-gray-200">
-            <div className="text-6xl mb-4">📭</div>
+            <div className="w-20 h-20 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-6">
+              <FontAwesomeIcon icon={faInbox} className="text-4xl text-gray-400" />
+            </div>
             <h2 className="text-xl font-semibold text-gray-900 mb-2">
               No Polls Yet
             </h2>

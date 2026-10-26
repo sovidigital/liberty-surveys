@@ -14,6 +14,10 @@
     "recap:preview": "tsx scripts/send-recap.ts --preview"
   },
   "dependencies": {
+    "@fortawesome/fontawesome-svg-core": "^7.3.1",
+    "@fortawesome/free-regular-svg-icons": "^7.3.1",
+    "@fortawesome/free-solid-svg-icons": "^7.3.1",
+    "@fortawesome/react-fontawesome": "^3.5.0",
     "@types/bcryptjs": "^2.4.6",
     "@types/pg": "^8.23.1",
     "bcryptjs": "^3.0.3",

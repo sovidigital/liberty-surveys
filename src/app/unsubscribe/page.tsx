@@ -1,17 +1,37 @@
 import Link from 'next/link';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { 
+  faHand,
+  faCircleCheck,
+  faCircleXmark, 
+  faCircleQuestion, 
+  faTriangleExclamation,
+  faInbox 
+} from '@fortawesome/free-solid-svg-icons';
+import { IconDefinition } from '@fortawesome/fontawesome-svg-core';
 
 interface Props {
   searchParams: Promise<{ status?: string; error?: string }>;
 }
 
+interface ContentConfig {
+  icon: IconDefinition;
+  iconBg: string;
+  iconColor: string;
+  title: string;
+  message: string;
+  showResubscribe: boolean;
+}
+
 export default async function UnsubscribePage({ searchParams }: Props) {
   const { status, error } = await searchParams;
 
-  const getContent = () => {
+  const getContent = (): ContentConfig => {
     if (status === 'success') {
       return {
-        icon: '👋',
+        icon: faHand,
         iconBg: 'bg-blue-100',
+        iconColor: 'text-blue-600',
         title: 'Successfully Unsubscribed',
         message: 'You\'ve been unsubscribed from Liberty Surveys. We\'re sorry to see you go! You can resubscribe anytime.',
         showResubscribe: true,
@@ -20,8 +40,9 @@ export default async function UnsubscribePage({ searchParams }: Props) {
 
     if (status === 'already_unsubscribed') {
       return {
-        icon: '✓',
+        icon: faCircleCheck,
         iconBg: 'bg-gray-100',
+        iconColor: 'text-gray-600',
         title: 'Already Unsubscribed',
         message: 'This email has already been unsubscribed from Liberty Surveys.',
         showResubscribe: true,
@@ -30,8 +51,9 @@ export default async function UnsubscribePage({ searchParams }: Props) {
 
     if (error === 'invalid' || error === 'invalid_token') {
       return {
-        icon: '✗',
+        icon: faCircleXmark,
         iconBg: 'bg-red-100',
+        iconColor: 'text-red-600',
         title: 'Invalid Link',
         message: 'This unsubscribe link is invalid. Please use the unsubscribe link from one of our emails.',
         showResubscribe: false,
@@ -40,8 +62,9 @@ export default async function UnsubscribePage({ searchParams }: Props) {
 
     if (error === 'not_found') {
       return {
-        icon: '?',
+        icon: faCircleQuestion,
         iconBg: 'bg-gray-100',
+        iconColor: 'text-gray-600',
         title: 'Not Found',
         message: 'We couldn\'t find this subscription in our records.',
         showResubscribe: false,
@@ -50,8 +73,9 @@ export default async function UnsubscribePage({ searchParams }: Props) {
 
     if (error === 'server') {
       return {
-        icon: '!',
+        icon: faTriangleExclamation,
         iconBg: 'bg-red-100',
+        iconColor: 'text-red-600',
         title: 'Something Went Wrong',
         message: 'An error occurred while processing your request. Please try again.',
         showResubscribe: false,
@@ -59,8 +83,9 @@ export default async function UnsubscribePage({ searchParams }: Props) {
     }
 
     return {
-      icon: '📭',
+      icon: faInbox,
       iconBg: 'bg-gray-100',
+      iconColor: 'text-gray-600',
       title: 'Unsubscribe',
       message: 'Use the unsubscribe link in any of our emails to manage your subscription.',
       showResubscribe: false,
@@ -73,7 +98,7 @@ export default async function UnsubscribePage({ searchParams }: Props) {
     <main className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
       <div className="max-w-md w-full text-center">
         <div className={`w-20 h-20 ${content.iconBg} rounded-full flex items-center justify-center mx-auto mb-6`}>
-          <span className="text-4xl">{content.icon}</span>
+          <FontAwesomeIcon icon={content.icon} className={`text-4xl ${content.iconColor}`} />
         </div>
         
         <h1 className="text-2xl font-bold text-gray-900 mb-4">
