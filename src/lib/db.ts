@@ -1,30 +1,38 @@
 import { Pool, PoolClient, QueryResult, QueryResultRow } from 'pg';
+import { AuroraDSQLPool } from '@aws/aurora-dsql-node-postgres-connector';
 
-let pool: Pool | null = null;
+let pool: Pool | AuroraDSQLPool | null = null;
 
-function getPool(): Pool {
+async function getPool(): Promise<Pool | AuroraDSQLPool> {
   if (!pool) {
-    const connectionString = process.env.DATABASE_URL;
-    
-    if (!connectionString) {
-      if (process.env.NODE_ENV === 'development' && process.env.USE_MOCK_DB === 'true') {
-        console.warn('DATABASE_URL not set, using mock database for development');
-        return createMockPool();
-      }
-      throw new Error('DATABASE_URL environment variable is not set');
+    const useMockDb = process.env.USE_MOCK_DB === 'true';
+
+    if (useMockDb) {
+      console.warn('USE_MOCK_DB=true, using mock database');
+      return createMockPool();
     }
 
-    pool = new Pool({
-      connectionString,
-      ssl: process.env.DATABASE_SSL === 'false' ? false : { rejectUnauthorized: false },
+    const endpoint = process.env.DSQL_ENDPOINT;
+    const user = process.env.DSQL_USER || 'admin';
+    const region = process.env.DSQL_REGION || process.env.AWS_REGION || 'us-east-1';
+
+    if (!endpoint) {
+      throw new Error('DSQL_ENDPOINT environment variable is not set. Set DSQL_ENDPOINT to your Aurora DSQL cluster endpoint.');
+    }
+
+    // AuroraDSQLPool automatically handles IAM authentication token generation
+    // AWS credentials are picked up from the environment (Amplify WEB_COMPUTE runtime)
+    pool = new AuroraDSQLPool({
+      host: endpoint,
+      user,
+      region,
+      database: 'postgres',
       max: 10,
       idleTimeoutMillis: 30000,
       connectionTimeoutMillis: 10000,
     });
 
-    pool.on('error', (err) => {
-      console.error('Unexpected database pool error:', err);
-    });
+    console.log(`DSQL pool configured for ${endpoint} (region: ${region}, user: ${user})`);
   }
 
   return pool;
@@ -34,17 +42,17 @@ export async function query<T extends QueryResultRow = QueryResultRow>(
   text: string,
   params?: unknown[]
 ): Promise<QueryResult<T>> {
-  const client = getPool();
+  const client = await getPool();
   const start = Date.now();
-  
+
   try {
     const result = await client.query<T>(text, params);
     const duration = Date.now() - start;
-    
+
     if (process.env.NODE_ENV === 'development') {
       console.log('Executed query', { text: text.substring(0, 100), duration, rows: result.rowCount });
     }
-    
+
     return result;
   } catch (error) {
     console.error('Database query error:', { text: text.substring(0, 100), error });
@@ -53,14 +61,15 @@ export async function query<T extends QueryResultRow = QueryResultRow>(
 }
 
 export async function getClient(): Promise<PoolClient> {
-  return getPool().connect();
+  const p = await getPool();
+  return p.connect();
 }
 
 export async function transaction<T>(
   callback: (client: PoolClient) => Promise<T>
 ): Promise<T> {
   const client = await getClient();
-  
+
   try {
     await client.query('BEGIN');
     const result = await callback(client);
@@ -84,7 +93,7 @@ export async function closePool(): Promise<void> {
 function createMockPool(): Pool {
   const now = new Date();
   const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-  
+
   const mockPolls = [
     {
       id: '01MOCK0001',
@@ -165,10 +174,10 @@ function createMockPool(): Pool {
   const mockPool = {
     query: async (text: string, params?: unknown[]): Promise<QueryResult> => {
       console.log('[MOCK DB] Query:', text.substring(0, 80), params);
-      
+
       const textLower = text.toLowerCase();
       let rows: Record<string, unknown>[] = [];
-      
+
       if (textLower.includes('from polls') && textLower.includes('select')) {
         if (params && params[0]) {
           rows = mockPolls.filter(p => p.id === params[0]);
@@ -204,7 +213,7 @@ function createMockPool(): Pool {
       } else if (textLower.includes('from evergreen_polls')) {
         rows = [];
       }
-      
+
       return {
         rows,
         rowCount: rows.length,

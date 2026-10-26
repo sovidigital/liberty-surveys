@@ -19,9 +19,10 @@ CREATE TABLE IF NOT EXISTS subscribers (
   CONSTRAINT subscribers_status_check CHECK (status IN ('pending', 'active', 'unsubscribed'))
 );
 
-CREATE INDEX IF NOT EXISTS idx_subscribers_email ON subscribers(email);
-CREATE INDEX IF NOT EXISTS idx_subscribers_status ON subscribers(status);
-CREATE INDEX IF NOT EXISTS idx_subscribers_confirmation_token ON subscribers(confirmation_token);
+-- Note: DSQL requires ASYNC indexes. These run in background and may take time to become usable.
+CREATE INDEX ASYNC IF NOT EXISTS idx_subscribers_email ON subscribers(email);
+CREATE INDEX ASYNC IF NOT EXISTS idx_subscribers_status ON subscribers(status);
+CREATE INDEX ASYNC IF NOT EXISTS idx_subscribers_confirmation_token ON subscribers(confirmation_token);
 
 -- ============================================================================
 -- POLLS TABLE
@@ -40,9 +41,9 @@ CREATE TABLE IF NOT EXISTS polls (
   CONSTRAINT polls_status_check CHECK (status IN ('draft', 'scheduled', 'active', 'closed'))
 );
 
-CREATE INDEX IF NOT EXISTS idx_polls_status ON polls(status);
-CREATE INDEX IF NOT EXISTS idx_polls_scheduled_for ON polls(scheduled_for);
-CREATE INDEX IF NOT EXISTS idx_polls_published_at ON polls(published_at);
+CREATE INDEX ASYNC IF NOT EXISTS idx_polls_status ON polls(status);
+CREATE INDEX ASYNC IF NOT EXISTS idx_polls_scheduled_for ON polls(scheduled_for);
+CREATE INDEX ASYNC IF NOT EXISTS idx_polls_published_at ON polls(published_at);
 
 -- ============================================================================
 -- POLL OPTIONS TABLE
@@ -58,7 +59,7 @@ CREATE TABLE IF NOT EXISTS poll_options (
   -- Application layer must enforce referential integrity
 );
 
-CREATE INDEX IF NOT EXISTS idx_poll_options_poll_id ON poll_options(poll_id);
+CREATE INDEX ASYNC IF NOT EXISTS idx_poll_options_poll_id ON poll_options(poll_id);
 
 -- ============================================================================
 -- VOTES TABLE
@@ -77,9 +78,9 @@ CREATE TABLE IF NOT EXISTS votes (
   -- Application layer must enforce referential integrity
 );
 
-CREATE INDEX IF NOT EXISTS idx_votes_poll_id ON votes(poll_id);
-CREATE INDEX IF NOT EXISTS idx_votes_option_id ON votes(option_id);
-CREATE INDEX IF NOT EXISTS idx_votes_subscriber_id ON votes(subscriber_id);
+CREATE INDEX ASYNC IF NOT EXISTS idx_votes_poll_id ON votes(poll_id);
+CREATE INDEX ASYNC IF NOT EXISTS idx_votes_option_id ON votes(option_id);
+CREATE INDEX ASYNC IF NOT EXISTS idx_votes_subscriber_id ON votes(subscriber_id);
 
 -- ============================================================================
 -- ADMIN USERS TABLE

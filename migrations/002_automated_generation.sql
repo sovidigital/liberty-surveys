@@ -33,7 +33,8 @@ CREATE TABLE IF NOT EXISTS poll_sources (
   CONSTRAINT poll_sources_perspective_check CHECK (perspective_used IN ('background', 'conservative', 'liberal', 'centrist'))
 );
 
-CREATE INDEX IF NOT EXISTS idx_poll_sources_poll_id ON poll_sources(poll_id);
+-- Note: DSQL requires ASYNC indexes
+CREATE INDEX ASYNC IF NOT EXISTS idx_poll_sources_poll_id ON poll_sources(poll_id);
 
 -- ============================================================================
 -- GENERATION RUNS TABLE
@@ -84,8 +85,8 @@ CREATE TABLE IF NOT EXISTS generation_runs (
   CONSTRAINT generation_runs_status_check CHECK (status IN ('pending', 'fetching_news', 'selecting_topic', 'generating', 'validating', 'success', 'failed', 'fallback'))
 );
 
-CREATE INDEX IF NOT EXISTS idx_generation_runs_date ON generation_runs(run_date);
-CREATE INDEX IF NOT EXISTS idx_generation_runs_status ON generation_runs(status);
+CREATE INDEX ASYNC IF NOT EXISTS idx_generation_runs_date ON generation_runs(run_date);
+CREATE INDEX ASYNC IF NOT EXISTS idx_generation_runs_status ON generation_runs(status);
 
 -- ============================================================================
 -- FETCHED ARTICLES TABLE
@@ -108,8 +109,8 @@ CREATE TABLE IF NOT EXISTS fetched_articles (
   CONSTRAINT fetched_articles_lean_check CHECK (political_lean IN ('left', 'center-left', 'center', 'center-right', 'right'))
 );
 
-CREATE INDEX IF NOT EXISTS idx_fetched_articles_run_id ON fetched_articles(generation_run_id);
-CREATE INDEX IF NOT EXISTS idx_fetched_articles_topic ON fetched_articles(topic_cluster);
+CREATE INDEX ASYNC IF NOT EXISTS idx_fetched_articles_run_id ON fetched_articles(generation_run_id);
+CREATE INDEX ASYNC IF NOT EXISTS idx_fetched_articles_topic ON fetched_articles(topic_cluster);
 
 -- ============================================================================
 -- EVERGREEN BACKUP POLLS TABLE
@@ -202,9 +203,9 @@ CREATE TABLE IF NOT EXISTS recap_sends (
   CONSTRAINT recap_sends_status_check CHECK (status IN ('pending', 'sending', 'sent', 'skipped', 'failed'))
 );
 
-CREATE INDEX IF NOT EXISTS idx_recap_sends_poll_id ON recap_sends(poll_id);
-CREATE INDEX IF NOT EXISTS idx_recap_sends_date ON recap_sends(send_date);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_recap_sends_poll_date ON recap_sends(poll_id, send_date);
+CREATE INDEX ASYNC IF NOT EXISTS idx_recap_sends_poll_id ON recap_sends(poll_id);
+CREATE INDEX ASYNC IF NOT EXISTS idx_recap_sends_date ON recap_sends(send_date);
+CREATE UNIQUE INDEX ASYNC IF NOT EXISTS idx_recap_sends_poll_date ON recap_sends(poll_id, send_date);
 
 -- ============================================================================
 -- NOTES
