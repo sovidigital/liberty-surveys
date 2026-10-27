@@ -101,7 +101,7 @@ function parseJsonWithRecovery<T>(jsonStr: string, context: string): T {
 
 const DEFAULT_MODEL = 'grok-4.7';
 const DEFAULT_BIAS_CHECK_MODEL = 'grok-4.7';
-const DEFAULT_LLM_TIMEOUT_MS = 15000; // 15 seconds per LLM call
+const DEFAULT_LLM_TIMEOUT_MS = 90000; // 90 seconds per LLM call
 
 export function getModelId(): string {
   return process.env.XAI_MODEL || DEFAULT_MODEL;
@@ -113,7 +113,13 @@ export function getBiasCheckModelId(): string {
 
 export function getLlmTimeoutMs(): number {
   const envTimeout = process.env.LLM_TIMEOUT_MS;
-  return envTimeout ? parseInt(envTimeout, 10) : DEFAULT_LLM_TIMEOUT_MS;
+  if (envTimeout) {
+    const parsed = parseInt(envTimeout, 10);
+    if (!isNaN(parsed) && parsed > 0) {
+      return parsed;
+    }
+  }
+  return DEFAULT_LLM_TIMEOUT_MS;
 }
 
 export class LlmTimeoutError extends Error {
