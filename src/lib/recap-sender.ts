@@ -13,6 +13,28 @@ import {
 } from '@/types';
 
 // ============================================================================
+// Recap Sender
+// ============================================================================
+// 
+// AUDIENCE PATTERN:
+// The nightly recap uses a different pattern than the daily poll broadcast:
+//
+// - Daily Poll: Uses `per_user_data` with segment-resolved subscribers to provide
+//   signed vote URLs unique to each subscriber. Requires resolving CIO segment
+//   members and syncing to DSQL before trigger.
+//
+// - Nightly Recap: Uses campaign's built-in `recipients_filter` (configured in CIO).
+//   Only needs shared `data` (poll results, briefing excerpt). No per-user URLs needed.
+//   The campaign in CIO should be configured with a segment or filter that determines
+//   who receives the recap (e.g., all subscribed people, or a specific segment).
+//
+// This distinction matters because CIO's broadcast trigger API allows exactly ONE of:
+// recipients, ids, emails, per_user_data, data_file_url - OR rely on campaign's 
+// recipients_filter if none provided.
+//
+// ============================================================================
+
+// ============================================================================
 // Configuration
 // ============================================================================
 

@@ -5,6 +5,14 @@ interface CustomerioConfig {
   siteId: string;
   apiKey: string;
   appApiKey?: string;
+  environmentId?: string;
+}
+
+export interface CIOSegmentMember {
+  id: string;
+  internalId: string;
+  email: string;
+  attributes: Record<string, unknown>;
 }
 
 let configWarningLogged = false;
@@ -13,16 +21,17 @@ function getConfig(): CustomerioConfig {
   const siteId = process.env.CUSTOMERIO_SITE_ID;
   const apiKey = process.env.CUSTOMERIO_API_KEY;
   const appApiKey = process.env.CUSTOMERIO_APP_API_KEY;
+  const environmentId = process.env.CUSTOMERIO_ENVIRONMENT_ID;
 
   if (!siteId || !apiKey) {
     if (!configWarningLogged) {
       console.warn('[Customer.io] Credentials not set, using mock mode. Set CUSTOMERIO_SITE_ID and CUSTOMERIO_API_KEY to enable.');
       configWarningLogged = true;
     }
-    return { siteId: 'mock', apiKey: 'mock', appApiKey: 'mock' };
+    return { siteId: 'mock', apiKey: 'mock', appApiKey: 'mock', environmentId: 'mock' };
   }
 
-  return { siteId, apiKey, appApiKey };
+  return { siteId, apiKey, appApiKey, environmentId };
 }
 
 function getTrackAuthHeader(): string {
@@ -311,6 +320,119 @@ export async function triggerRecapBroadcast(
   return { subscriberCount: -1 };
 }
 
+// ============================================================================
+// Segment Member Fetching
+// ============================================================================
+// 
+// Uses App API endpoint: GET /v1/segments/{segment_id}/membership
+// Docs: https://docs.customer.io/integrations/api/app/tag/segments/
+// Auth: Bearer CUSTOMERIO_APP_API_KEY (same as transactional sends)
+// 
+// NOTE: This does NOT use /environments/{env_id}/customers (Fly API) which
+// requires different authentication and would 404 on api.customer.io.
+// ============================================================================
+
+interface CIOSegmentMembershipResponse {
+  ids: string[];
+  next: string;
+}
+
+interface CIOCustomerAttributesResponse {
+  customer: {
+    id: string;
+    identifiers: {
+      id?: string;
+      email?: string;
+      cio_id?: string;
+    };
+    attributes: Record<string, unknown>;
+  };
+}
+
+export async function fetchSegmentMembers(segmentId: number): Promise<CIOSegmentMember[]> {
+  const config = getConfig();
+  
+  if (config.siteId === 'mock') {
+    console.log(`[Customer.io MOCK] Would fetch segment ${segmentId} members`);
+    return [
+      { id: 'mock-1', internalId: 'abc123', email: 'test1@example.com', attributes: {} },
+      { id: 'mock-2', internalId: 'def456', email: 'test2@example.com', attributes: {} },
+    ];
+  }
+  
+  const members: CIOSegmentMember[] = [];
+  let cursor: string | null = null;
+  
+  console.log(`[Customer.io] Fetching segment ${segmentId} members via App API...`);
+  
+  do {
+    const url = cursor 
+      ? `${APP_API_BASE}/segments/${segmentId}/membership?start=${cursor}`
+      : `${APP_API_BASE}/segments/${segmentId}/membership`;
+    
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Authorization': getAppAuthHeader(),
+      },
+    });
+    
+    if (!response.ok) {
+      const error = await response.text();
+      console.error(`[Customer.io] Segment membership fetch error: ${response.status}`, error);
+      throw new Error(`Failed to fetch segment members: ${response.status} ${error}`);
+    }
+    
+    const data: CIOSegmentMembershipResponse = await response.json();
+    
+    for (const customerId of data.ids) {
+      try {
+        const attrResponse = await fetch(`${APP_API_BASE}/customers/${customerId}/attributes`, {
+          method: 'GET',
+          headers: {
+            'Authorization': getAppAuthHeader(),
+          },
+        });
+        
+        if (!attrResponse.ok) {
+          console.warn(`[Customer.io] Failed to fetch attributes for ${customerId}`);
+          continue;
+        }
+        
+        const attrData: CIOCustomerAttributesResponse = await attrResponse.json();
+        const customer = attrData.customer;
+        
+        const email = customer.identifiers.email || 
+                     (customer.attributes.email as string) ||
+                     '';
+        
+        if (!email) {
+          console.warn(`[Customer.io] Skipping customer ${customerId} without email`);
+          continue;
+        }
+        
+        members.push({
+          id: customer.identifiers.id || customerId,
+          internalId: customer.identifiers.cio_id || customerId,
+          email,
+          attributes: customer.attributes,
+        });
+      } catch (err) {
+        console.warn(`[Customer.io] Error fetching customer ${customerId}:`, err);
+      }
+    }
+    
+    cursor = data.next || null;
+    
+    if (members.length % 50 === 0 && members.length > 0) {
+      console.log(`[Customer.io] Fetched ${members.length} members so far...`);
+    }
+  } while (cursor);
+  
+  console.log(`[Customer.io] Fetched ${members.length} members from segment ${segmentId}`);
+  return members;
+}
+
 export const customerio = {
   identifySubscriber,
   trackEvent,
@@ -319,6 +441,7 @@ export const customerio = {
   triggerBroadcast,
   triggerPollBroadcast,
   triggerRecapBroadcast,
+  fetchSegmentMembers,
 };
 
 export default customerio;
