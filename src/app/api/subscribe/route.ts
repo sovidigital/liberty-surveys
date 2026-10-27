@@ -79,20 +79,27 @@ export async function POST(request: NextRequest) {
       }
 
       if (subscriber.status === 'unsubscribed') {
-        const confirmationToken = generateConfirmationToken(subscriber.id, normalizedEmail);
-        const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+        try {
+          const confirmationToken = generateConfirmationToken(subscriber.id, normalizedEmail);
+          const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
 
-        await query(
-          `UPDATE subscribers 
-           SET status = 'pending', 
-               confirmation_token = $1, 
-               confirmation_expires_at = $2,
-               updated_at = NOW()
-           WHERE id = $3`,
-          [confirmationToken, expiresAt, subscriber.id]
-        );
+          await query(
+            `UPDATE subscribers 
+             SET status = 'pending', 
+                 confirmation_token = $1, 
+                 confirmation_expires_at = $2,
+                 updated_at = NOW()
+             WHERE id = $3`,
+            [confirmationToken, expiresAt, subscriber.id]
+          );
 
-        await sendConfirmationEmail(subscriber.id, normalizedEmail, confirmationToken);
+          await sendConfirmationEmail(subscriber.id, normalizedEmail, confirmationToken);
+        } catch (resubError) {
+          console.error('[API /subscribe] Resubscribe flow error (non-fatal):', {
+            error: resubError instanceof Error ? resubError.message : String(resubError),
+            subscriberId: subscriber.id,
+          });
+        }
 
         return NextResponse.json({
           message: 'Please check your email to confirm your subscription.',
@@ -104,8 +111,22 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const subscriberId = generateId();
-    const confirmationToken = generateConfirmationToken(subscriberId, normalizedEmail);
+    let subscriberId: string;
+    let confirmationToken: string;
+    
+    try {
+      subscriberId = generateId();
+      confirmationToken = generateConfirmationToken(subscriberId, normalizedEmail);
+    } catch (tokenError) {
+      console.error('[API /subscribe] Token generation failed:', {
+        error: tokenError instanceof Error ? tokenError.message : String(tokenError),
+      });
+      return NextResponse.json(
+        { error: 'Service temporarily unavailable. Please try again.' },
+        { status: 503 }
+      );
+    }
+    
     const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
 
     await query(
@@ -126,7 +147,14 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    await sendConfirmationEmail(subscriberId, normalizedEmail, confirmationToken);
+    try {
+      await sendConfirmationEmail(subscriberId, normalizedEmail, confirmationToken);
+    } catch (emailError) {
+      console.warn('[API /subscribe] Confirmation email failed (non-fatal):', {
+        error: emailError instanceof Error ? emailError.message : String(emailError),
+        subscriberId,
+      });
+    }
 
     return NextResponse.json({
       message: 'Please check your email to confirm your subscription.',

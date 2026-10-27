@@ -3,26 +3,68 @@ import { AuroraDSQLPool } from '@aws/aurora-dsql-node-postgres-connector';
 
 let pool: Pool | AuroraDSQLPool | null = null;
 let connectionError: Error | null = null;
+let initAttempted = false;
 
 function logError(context: string, error: unknown): void {
   const errorMessage = error instanceof Error ? error.message : String(error);
   const errorName = error instanceof Error ? error.name : 'Unknown';
-  const errorStack = error instanceof Error ? error.stack?.split('\n').slice(0, 3).join('\n') : '';
+  const errorStack = error instanceof Error ? error.stack?.split('\n').slice(0, 5).join('\n') : '';
   
-  console.error(`[DB ${context}]`, {
+  console.error(`[DB ${context}]`, JSON.stringify({
     error: errorName,
     message: errorMessage,
     stack: errorStack,
     timestamp: new Date().toISOString(),
-  });
+  }));
 }
 
 function logInfo(context: string, message: string, data?: Record<string, unknown>): void {
-  console.log(`[DB ${context}]`, {
+  console.log(`[DB ${context}]`, JSON.stringify({
     message,
     ...data,
     timestamp: new Date().toISOString(),
-  });
+  }));
+}
+
+function categorizeError(error: Error): { category: string; userMessage: string } {
+  const msg = error.message.toLowerCase();
+  
+  if (msg.includes('credential') || msg.includes('token') || msg.includes('iam') || 
+      msg.includes('authorization') || msg.includes('access denied') || 
+      msg.includes('security token') || msg.includes('expired')) {
+    return {
+      category: 'auth',
+      userMessage: 'Database authentication failed. IAM credentials may be missing or expired.',
+    };
+  }
+  if (msg.includes('timeout') || msg.includes('etimedout') || msg.includes('timed out')) {
+    return {
+      category: 'timeout',
+      userMessage: 'Database connection timed out. Check network/VPC configuration.',
+    };
+  }
+  if (msg.includes('enotfound') || msg.includes('getaddrinfo') || msg.includes('dns')) {
+    return {
+      category: 'dns',
+      userMessage: 'Database host not found. Check DSQL_ENDPOINT configuration.',
+    };
+  }
+  if (msg.includes('econnrefused') || msg.includes('connection refused')) {
+    return {
+      category: 'connection',
+      userMessage: 'Database connection refused. Check endpoint and security groups.',
+    };
+  }
+  if (msg.includes('ssl') || msg.includes('certificate')) {
+    return {
+      category: 'ssl',
+      userMessage: 'SSL/TLS error connecting to database.',
+    };
+  }
+  return {
+    category: 'unknown',
+    userMessage: error.message,
+  };
 }
 
 async function getPool(): Promise<Pool | AuroraDSQLPool> {
@@ -35,7 +77,8 @@ async function getPool(): Promise<Pool | AuroraDSQLPool> {
 
     if (useMockDb) {
       logInfo('INIT', 'Using mock database (USE_MOCK_DB=true)');
-      return createMockPool();
+      pool = createMockPool();
+      return pool;
     }
 
     const endpoint = process.env.DSQL_ENDPOINT;
@@ -50,29 +93,42 @@ async function getPool(): Promise<Pool | AuroraDSQLPool> {
       throw connectionError;
     }
 
-    logInfo('INIT', 'Configuring DSQL pool', { endpoint, user, region });
+    logInfo('INIT', 'Configuring DSQL pool', { 
+      endpoint: endpoint.substring(0, 30) + '...', 
+      user, 
+      region,
+      hasAwsAccessKeyId: !!process.env.AWS_ACCESS_KEY_ID,
+      hasAwsRoleArn: !!process.env.AWS_ROLE_ARN,
+      hasAwsWebIdentityTokenFile: !!process.env.AWS_WEB_IDENTITY_TOKEN_FILE,
+      awsExecutionEnv: process.env.AWS_EXECUTION_ENV || 'none',
+    });
+
+    initAttempted = true;
 
     try {
       pool = new AuroraDSQLPool({
         host: endpoint,
         user,
         region,
-        database: 'postgres',
         max: 10,
         idleTimeoutMillis: 30000,
-        connectionTimeoutMillis: 15000,
+        connectionTimeoutMillis: 30000,
         logger: {
-          warn: (msg: string) => console.warn(`[DSQL] ${msg}`),
-          error: (msg: string) => console.error(`[DSQL] ${msg}`),
+          warn: (msg: string) => console.warn(`[DSQL WARN] ${msg}`),
+          error: (msg: string) => console.error(`[DSQL ERROR] ${msg}`),
         },
       });
 
-      logInfo('INIT', 'DSQL pool created successfully', { endpoint, region, user });
+      logInfo('INIT', 'DSQL pool object created', { endpoint: endpoint.substring(0, 30) + '...', region, user });
     } catch (err) {
-      connectionError = new Error(
-        `Failed to create DSQL pool: ${err instanceof Error ? err.message : String(err)}`
-      );
-      logError('INIT', connectionError);
+      const errObj = err instanceof Error ? err : new Error(String(err));
+      const { category, userMessage } = categorizeError(errObj);
+      connectionError = new Error(`[${category}] ${userMessage}`);
+      logError('INIT', { 
+        message: 'Failed to create DSQL pool', 
+        originalError: errObj.message,
+        category,
+      });
       throw connectionError;
     }
   }
@@ -104,30 +160,18 @@ export async function query<T extends QueryResultRow = QueryResultRow>(
     return result;
   } catch (error) {
     const duration = Date.now() - start;
+    const errObj = error instanceof Error ? error : new Error(String(error));
+    const { category, userMessage } = categorizeError(errObj);
     
     logError('QUERY', {
       message: `[${queryId}] Query failed after ${duration}ms`,
       query: textPreview,
-      error: error instanceof Error ? error.message : String(error),
-      errorType: error instanceof Error ? error.name : 'Unknown',
+      error: errObj.message,
+      errorType: errObj.name,
+      category,
     } as unknown as Error);
 
-    if (error instanceof Error) {
-      if (error.message.includes('credential') || 
-          error.message.includes('token') ||
-          error.message.includes('IAM') ||
-          error.message.includes('authorization')) {
-        throw new Error('Database authentication failed. Check IAM role configuration.');
-      }
-      if (error.message.includes('timeout') || error.message.includes('ETIMEDOUT')) {
-        throw new Error('Database connection timed out. Check network configuration.');
-      }
-      if (error.message.includes('ENOTFOUND') || error.message.includes('getaddrinfo')) {
-        throw new Error('Database host not found. Check DSQL_ENDPOINT configuration.');
-      }
-    }
-
-    throw error;
+    throw new Error(`[${category}] ${userMessage}`);
   }
 }
 
@@ -162,16 +206,35 @@ export async function closePool(): Promise<void> {
   connectionError = null;
 }
 
-export async function testConnection(): Promise<{ ok: boolean; error?: string; latency?: number }> {
+export async function testConnection(): Promise<{ 
+  ok: boolean; 
+  error?: string; 
+  errorCategory?: string;
+  latency?: number;
+  poolCreated?: boolean;
+}> {
   const start = Date.now();
   try {
-    await query('SELECT 1 as ping');
-    return { ok: true, latency: Date.now() - start };
+    const p = await getPool();
+    const poolCreated = !!p;
+    
+    const result = await p.query('SELECT 1 as ping');
+    
+    return { 
+      ok: true, 
+      latency: Date.now() - start,
+      poolCreated,
+    };
   } catch (error) {
+    const errObj = error instanceof Error ? error : new Error(String(error));
+    const { category } = categorizeError(errObj);
+    
     return { 
       ok: false, 
-      error: error instanceof Error ? error.message : String(error),
+      error: errObj.message,
+      errorCategory: category,
       latency: Date.now() - start,
+      poolCreated: !!pool,
     };
   }
 }
