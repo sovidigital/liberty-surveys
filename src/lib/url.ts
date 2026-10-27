@@ -57,10 +57,35 @@ export function getBaseUrlOrNull(): string | null {
 }
 
 /**
- * Build a redirect URL from a request and path.
- * Uses the request's origin for the base URL.
+ * Public origin for user-facing redirects.
+ *
+ * Never use request.url here: on Amplify SSR the Lambda sees an internal
+ * origin (https://localhost:3000), which leaked into post-vote redirects.
+ * Order: NEXT_PUBLIC_BASE_URL (non-localhost) -> x-forwarded-host/host
+ * (non-localhost) -> getRequiredBaseUrl() dev fallback.
+ */
+export function getPublicOrigin(request?: NextRequest): string {
+  const env = process.env.NEXT_PUBLIC_BASE_URL;
+  if (env && !/localhost|127\.0\.0\.1/.test(env)) {
+    return env.replace(/\/+$/, '');
+  }
+  const host =
+    request?.headers.get('x-forwarded-host')?.split(',')[0].trim() ||
+    request?.headers.get('host') ||
+    '';
+  if (host && !/^(localhost|127\.0\.0\.1)(:|$)/.test(host)) {
+    const proto =
+      request?.headers.get('x-forwarded-proto')?.split(',')[0].trim() || 'https';
+    return `${proto}://${host}`;
+  }
+  if (!isProduction) return getRequiredBaseUrl().replace(/\/+$/, '');
+  return 'https://www.libertysurveys.com';
+}
+
+/**
+ * Build an absolute redirect URL for a path on the public site.
  */
 export function buildRedirectUrl(request: NextRequest, path: string): string {
-  const url = new URL(request.url);
-  return `${url.origin}${path}`;
+  const normalized = path.startsWith('/') ? path : `/${path}`;
+  return `${getPublicOrigin(request)}${normalized}`;
 }
