@@ -170,9 +170,8 @@ export async function POST(request: NextRequest) {
       timestamp: new Date().toISOString(),
     });
     
-    // TODO: remove production details after subscribe verified
     return NextResponse.json(
-      { error: 'An error occurred. Please try again.', details: errorMessage.substring(0, 300) },
+      { error: 'An error occurred. Please try again.' },
       { status: 500 }
     );
   }
