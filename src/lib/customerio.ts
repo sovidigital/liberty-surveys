@@ -150,30 +150,48 @@ export async function sendTransactionalEmail(options: TransactionalEmailOptions)
   return result.delivery_id;
 }
 
+export interface BroadcastPerUserData {
+  id: string;
+  data: Record<string, unknown>;
+}
+
 export interface BroadcastTriggerOptions {
   campaignId: number;
   recipients?: Record<string, unknown>;
   ids?: string[];
+  perUserData?: BroadcastPerUserData[];
   data?: Record<string, unknown>;
+  idIgnoreMissing?: boolean;
+  emailIgnoreMissing?: boolean;
 }
 
 export async function triggerBroadcast(
-  environmentId: string,
   options: BroadcastTriggerOptions
 ): Promise<void> {
-  const body: Record<string, unknown> = {
-    data: options.data || {},
-  };
+  const body: Record<string, unknown> = {};
+
+  if (options.data) {
+    body.data = options.data;
+  }
 
   if (options.recipients) {
     body.recipients = options.recipients;
   } else if (options.ids) {
     body.ids = options.ids;
+  } else if (options.perUserData) {
+    body.per_user_data = options.perUserData;
+  }
+
+  if (options.idIgnoreMissing) {
+    body.id_ignore_missing = true;
+  }
+  if (options.emailIgnoreMissing) {
+    body.email_ignore_missing = true;
   }
 
   await appApiRequest(
     'POST',
-    `/environments/${environmentId}/campaigns/${options.campaignId}/triggers`,
+    `/campaigns/${options.campaignId}/triggers`,
     body
   );
 }
@@ -207,11 +225,10 @@ export interface PollBroadcastData {
 export async function triggerPollBroadcast(
   data: PollBroadcastData
 ): Promise<{ subscriberCount: number }> {
-  const environmentId = process.env.CUSTOMERIO_ENVIRONMENT_ID;
   const campaignId = process.env.CUSTOMERIO_BROADCAST_CAMPAIGN_ID;
   
-  if (!environmentId || !campaignId) {
-    console.warn('[Customer.io] Broadcast not configured, skipping');
+  if (!campaignId) {
+    console.warn('[Customer.io] Broadcast campaign ID not configured, skipping');
     return { subscriberCount: 0 };
   }
   
@@ -222,7 +239,7 @@ export async function triggerPollBroadcast(
     return { subscriberCount: 100 };
   }
   
-  await triggerBroadcast(environmentId, {
+  await triggerBroadcast({
     campaignId: parseInt(campaignId, 10),
     data: data as unknown as Record<string, unknown>,
   });
@@ -250,12 +267,6 @@ export async function triggerRecapBroadcast(
   campaignId: string,
   data: RecapBroadcastData
 ): Promise<{ subscriberCount: number }> {
-  const environmentId = process.env.CUSTOMERIO_ENVIRONMENT_ID;
-  
-  if (!environmentId) {
-    throw new Error('CUSTOMERIO_ENVIRONMENT_ID not configured');
-  }
-  
   const config = getConfig();
   
   if (config.siteId === 'mock') {
@@ -263,7 +274,7 @@ export async function triggerRecapBroadcast(
     return { subscriberCount: 100 };
   }
   
-  await triggerBroadcast(environmentId, {
+  await triggerBroadcast({
     campaignId: parseInt(campaignId, 10),
     data: data as unknown as Record<string, unknown>,
   });

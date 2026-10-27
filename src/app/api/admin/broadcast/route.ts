@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 import { getSession } from '@/lib/auth';
 import { generateVoteUrl, generateUnsubscribeUrl } from '@/lib/signatures';
-import { triggerBroadcast } from '@/lib/customerio';
+import { triggerBroadcast, BroadcastPerUserData } from '@/lib/customerio';
 import { Poll, PollOption, Subscriber } from '@/types';
 
 async function getTodaysScheduledPoll(): Promise<Poll | null> {
@@ -110,10 +110,9 @@ export async function POST(request: NextRequest) {
     }
 
     const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
-    const environmentId = process.env.CUSTOMERIO_ENVIRONMENT_ID;
     const broadcastCampaignId = process.env.CUSTOMERIO_BROADCAST_CAMPAIGN_ID;
 
-    if (!environmentId || !broadcastCampaignId) {
+    if (!broadcastCampaignId) {
       console.log('[DEV MODE] Broadcast would be sent with the following data:');
       console.log('Poll:', poll.question);
       console.log('Options:', optionsResult.rows.map(o => o.option_text));
@@ -147,7 +146,7 @@ export async function POST(request: NextRequest) {
     console.log(`[API] Broadcast triggered (scheduled: ${isScheduledJob}, poll: ${poll_id})`)
 
     const subscribers = subscribersResult.rows;
-    const perUserData = subscribers.map(sub => {
+    const perUserData: BroadcastPerUserData[] = subscribers.map(sub => {
       const options = optionsResult.rows.map(opt => ({
         id: opt.id,
         text: opt.option_text,
@@ -156,21 +155,25 @@ export async function POST(request: NextRequest) {
 
       return {
         id: sub.id,
-        email: sub.email,
-        poll_question: poll.question,
-        poll_id: poll.id,
-        options,
-        results_url: `${baseUrl}/polls/${poll.id}`,
-        unsubscribe_url: generateUnsubscribeUrl(baseUrl, sub.id, sub.email),
+        data: {
+          email: sub.email,
+          poll_question: poll.question,
+          poll_id: poll.id,
+          options,
+          results_url: `${baseUrl}/polls/${poll.id}`,
+          unsubscribe_url: generateUnsubscribeUrl(baseUrl, sub.id, sub.email),
+        },
       };
     });
 
-    await triggerBroadcast(environmentId, {
+    await triggerBroadcast({
       campaignId: parseInt(broadcastCampaignId, 10),
+      perUserData,
       data: {
         poll_id: poll.id,
         poll_question: poll.question,
       },
+      idIgnoreMissing: true,
     });
 
     await query(
