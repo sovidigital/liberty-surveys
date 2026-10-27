@@ -125,7 +125,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const environmentId = process.env.CUSTOMERIO_ENVIRONMENT_ID;
     const broadcastCampaignId = process.env.CUSTOMERIO_BROADCAST_CAMPAIGN_ID;
 
     const sourcesResult = await query<PollSource>(
@@ -136,7 +135,7 @@ export async function POST(request: NextRequest) {
       [poll_id]
     );
 
-    if (!environmentId || !broadcastCampaignId) {
+    if (!broadcastCampaignId) {
       console.log('[DEV MODE] Broadcast would be sent with the following data:');
       console.log('Poll:', poll.question);
       console.log('Options:', optionsResult.rows.map(o => o.option_text));
