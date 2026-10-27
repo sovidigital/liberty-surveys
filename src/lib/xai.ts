@@ -4,6 +4,98 @@ import crypto from 'crypto';
 const USE_MOCK = process.env.USE_MOCK_LLM === 'true' || process.env.USE_MOCK_DB === 'true';
 
 // ============================================================================
+// JSON Extraction Utilities
+// ============================================================================
+
+function extractJsonFromLlmResponse(text: string): string | null {
+  // Strategy 1: Look for JSON in markdown code fences (most common LLM pattern)
+  const fencePatterns = [
+    /```json\s*([\s\S]*?)```/i,
+    /```\s*([\s\S]*?)```/,
+  ];
+  
+  for (const pattern of fencePatterns) {
+    const match = text.match(pattern);
+    if (match) {
+      const content = match[1].trim();
+      if (content.startsWith('{') || content.startsWith('[')) {
+        return content;
+      }
+    }
+  }
+  
+  // Strategy 2: Find JSON object boundaries more carefully
+  // Look for the first '{' that's followed by a valid JSON key pattern
+  const jsonStartPattern = /\{[\s\n]*"[a-zA-Z_]/;
+  const startMatch = text.match(jsonStartPattern);
+  
+  if (startMatch && startMatch.index !== undefined) {
+    const startIdx = startMatch.index;
+    let depth = 0;
+    let inString = false;
+    let escape = false;
+    
+    for (let i = startIdx; i < text.length; i++) {
+      const char = text[i];
+      
+      if (escape) {
+        escape = false;
+        continue;
+      }
+      
+      if (char === '\\' && inString) {
+        escape = true;
+        continue;
+      }
+      
+      if (char === '"' && !escape) {
+        inString = !inString;
+        continue;
+      }
+      
+      if (!inString) {
+        if (char === '{') depth++;
+        if (char === '}') {
+          depth--;
+          if (depth === 0) {
+            return text.slice(startIdx, i + 1);
+          }
+        }
+      }
+    }
+  }
+  
+  // Strategy 3: Fallback to greedy match (original behavior)
+  const greedyMatch = text.match(/\{[\s\S]*\}/);
+  if (greedyMatch) {
+    return greedyMatch[0];
+  }
+  
+  return null;
+}
+
+function parseJsonWithRecovery<T>(jsonStr: string, context: string): T {
+  try {
+    return JSON.parse(jsonStr);
+  } catch (firstError) {
+    // Try to fix common JSON issues from LLMs
+    const fixed = jsonStr
+      // Fix trailing commas before } or ]
+      .replace(/,(\s*[}\]])/g, '$1')
+      // Fix unescaped newlines in strings (rare but happens)
+      .replace(/([^\\])\n/g, '$1\\n');
+    
+    try {
+      return JSON.parse(fixed);
+    } catch {
+      // Log the problematic JSON for debugging
+      console.error(`[XAI] JSON parse failed for ${context}. First 500 chars:`, jsonStr.slice(0, 500));
+      throw new Error(`Failed to parse JSON from LLM response (${context}): ${firstError instanceof Error ? firstError.message : 'unknown error'}`);
+    }
+  }
+}
+
+// ============================================================================
 // Configuration
 // ============================================================================
 
@@ -226,12 +318,18 @@ export async function generatePoll(
   
   console.log(`[XAI] Generation complete. Tokens: ${inputTokens} in, ${outputTokens} out`);
   
-  const jsonMatch = text.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) {
-    throw new Error('Failed to extract JSON from LLM response');
+  const jsonStr = extractJsonFromLlmResponse(text);
+  if (!jsonStr) {
+    console.error('[XAI] Failed to extract JSON. Raw response:', text.slice(0, 1000));
+    throw new Error('Failed to extract JSON from LLM response - no valid JSON structure found');
   }
   
-  const poll: GeneratedPoll = JSON.parse(jsonMatch[0]);
+  const poll = parseJsonWithRecovery<GeneratedPoll>(jsonStr, 'poll generation');
+  
+  // Validate required fields exist
+  if (!poll.question || !Array.isArray(poll.options) || poll.options.length === 0) {
+    throw new Error('Invalid poll structure: missing question or options');
+  }
   
   return {
     poll,
@@ -304,12 +402,13 @@ Return ONLY the JSON analysis.`;
     { maxTokens: 1024, temperature: 0.3, reasoningEffort: 'none' }
   );
   
-  const jsonMatch = text.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) {
+  const jsonStr = extractJsonFromLlmResponse(text);
+  if (!jsonStr) {
+    console.error('[XAI] Failed to extract JSON from bias check. Raw response:', text.slice(0, 500));
     throw new Error('Failed to extract JSON from bias check response');
   }
   
-  const result: BiasCheckResult = JSON.parse(jsonMatch[0]);
+  const result = parseJsonWithRecovery<BiasCheckResult>(jsonStr, 'bias check');
   
   result.passesThreshold = result.overallScore >= 0.7 &&
     result.questionBiasScore >= 0.5 &&
