@@ -2,9 +2,80 @@ import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 import { getSession } from '@/lib/auth';
 import { generateVoteUrl, generateUnsubscribeUrl } from '@/lib/signatures';
-import { triggerPollBroadcast, PollBroadcastSubscriberData, PollBroadcastSharedData } from '@/lib/customerio';
+import { triggerPollBroadcast, PollBroadcastSubscriberData, PollBroadcastSharedData, fetchSegmentMembers, identifySubscriber, CIOSegmentMember } from '@/lib/customerio';
 import { getRequiredBaseUrl } from '@/lib/url';
+import { generateId } from '@/lib/ulid';
 import { Poll, PollOption, PollSource, PollWithBriefing, Subscriber } from '@/types';
+
+interface LocalSubscriber {
+  id: string;
+  email: string;
+}
+
+async function upsertSegmentMembers(members: CIOSegmentMember[]): Promise<LocalSubscriber[]> {
+  const results: LocalSubscriber[] = [];
+  
+  for (const member of members) {
+    const email = member.email.toLowerCase();
+    
+    const existing = await query<{ id: string; status: string }>(
+      'SELECT id, status FROM subscribers WHERE email = $1',
+      [email]
+    );
+    
+    if (existing.rows.length > 0) {
+      const sub = existing.rows[0];
+      
+      if (sub.status !== 'active') {
+        await query(
+          `UPDATE subscribers 
+           SET status = 'active', 
+               subscribed_at = COALESCE(subscribed_at, NOW()),
+               unsubscribed_at = NULL,
+               updated_at = NOW()
+           WHERE id = $1`,
+          [sub.id]
+        );
+        console.log(`[Broadcast] Re-activated subscriber ${sub.id} from CIO segment`);
+      }
+      
+      results.push({ id: sub.id, email });
+    } else {
+      const cioIdClean = member.internalId.startsWith('cio_') 
+        ? member.internalId.slice(4) 
+        : member.internalId;
+      const subscriberId = cioIdClean.length >= 8 ? cioIdClean : generateId();
+      
+      const idConflict = await query<{ id: string }>(
+        'SELECT id FROM subscribers WHERE id = $1',
+        [subscriberId]
+      );
+      const finalId = idConflict.rows.length > 0 ? generateId() : subscriberId;
+      
+      await query(
+        `INSERT INTO subscribers (id, email, status, subscribed_at, created_at, updated_at)
+         VALUES ($1, $2, 'active', NOW(), NOW(), NOW())`,
+        [finalId, email]
+      );
+      
+      console.log(`[Broadcast] Created subscriber ${finalId} (${email}) from CIO segment`);
+      
+      try {
+        await identifySubscriber(finalId, {
+          email,
+          subscription_status: 'active',
+          subscribed_at: Math.floor(Date.now() / 1000),
+        });
+      } catch (err) {
+        console.warn(`[Broadcast] Failed to identify ${finalId} back to CIO:`, err);
+      }
+      
+      results.push({ id: finalId, email });
+    }
+  }
+  
+  return results;
+}
 
 async function getTodaysScheduledPoll(): Promise<Poll | null> {
   const pollResult = await query<Poll>(
@@ -102,16 +173,46 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const subscribersResult = await query<Subscriber>(
-      "SELECT id, email FROM subscribers WHERE status = 'active'",
-      []
-    );
-
-    if (subscribersResult.rows.length === 0) {
-      return NextResponse.json(
-        { error: 'No active subscribers to send to' },
-        { status: 400 }
+    const segmentId = process.env.CUSTOMERIO_BROADCAST_SEGMENT_ID;
+    let subscribers: LocalSubscriber[];
+    
+    if (segmentId) {
+      console.log(`[API] Using CIO segment ${segmentId} for broadcast audience`);
+      
+      try {
+        const segmentMembers = await fetchSegmentMembers(parseInt(segmentId, 10));
+        
+        if (segmentMembers.length === 0) {
+          return NextResponse.json(
+            { error: 'No members in the configured CIO segment' },
+            { status: 400 }
+          );
+        }
+        
+        subscribers = await upsertSegmentMembers(segmentMembers);
+        console.log(`[API] Synced ${subscribers.length} subscribers from CIO segment`);
+      } catch (err) {
+        console.error('[API] Failed to fetch CIO segment:', err);
+        return NextResponse.json(
+          { error: 'Failed to fetch CIO segment members', details: err instanceof Error ? err.message : String(err) },
+          { status: 500 }
+        );
+      }
+    } else {
+      console.log('[API] No CUSTOMERIO_BROADCAST_SEGMENT_ID configured, using all active DSQL subscribers');
+      const subscribersResult = await query<Subscriber>(
+        "SELECT id, email FROM subscribers WHERE status = 'active'",
+        []
       );
+      
+      if (subscribersResult.rows.length === 0) {
+        return NextResponse.json(
+          { error: 'No active subscribers to send to' },
+          { status: 400 }
+        );
+      }
+      
+      subscribers = subscribersResult.rows.map(s => ({ id: s.id, email: s.email }));
     }
 
     let baseUrl: string;
@@ -139,10 +240,11 @@ export async function POST(request: NextRequest) {
       console.log('[DEV MODE] Broadcast would be sent with the following data:');
       console.log('Poll:', poll.question);
       console.log('Options:', optionsResult.rows.map(o => o.option_text));
-      console.log('Subscribers:', subscribersResult.rows.length);
+      console.log('Subscribers:', subscribers.length);
       console.log('Sources:', sourcesResult.rows.length);
+      console.log('Audience source:', segmentId ? `CIO segment ${segmentId}` : 'DSQL active subscribers');
 
-      const sampleSubscriber = subscribersResult.rows[0];
+      const sampleSubscriber = subscribers[0];
       console.log('\nSample vote URLs for subscriber', sampleSubscriber.id);
       for (const option of optionsResult.rows) {
         const voteUrl = generateVoteUrl(baseUrl, poll.id, option.id, sampleSubscriber.id);
@@ -163,13 +265,12 @@ export async function POST(request: NextRequest) {
         message: '[DEV] Broadcast simulated - poll set to active',
         scheduled: isScheduledJob,
         poll_id,
-        subscribers_count: subscribersResult.rows.length,
+        subscribers_count: subscribers.length,
+        audience_source: segmentId ? `cio_segment_${segmentId}` : 'dsql_active',
       });
     }
     
-    console.log(`[API] Broadcast triggered (scheduled: ${isScheduledJob}, poll: ${poll_id})`);
-
-    const subscribers = subscribersResult.rows;
+    console.log(`[API] Broadcast triggered (scheduled: ${isScheduledJob}, poll: ${poll_id}, audience: ${segmentId ? `segment ${segmentId}` : 'dsql'})`);
     
     const sharedData: PollBroadcastSharedData = {
       poll_id: poll.id,
@@ -236,6 +337,8 @@ export async function GET() {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
   
+  const segmentId = process.env.CUSTOMERIO_BROADCAST_SEGMENT_ID;
+  
   return NextResponse.json({
     message: 'Daily poll broadcast endpoint',
     usage: {
@@ -248,10 +351,18 @@ export async function GET() {
         'x-scheduler-secret': 'secret - required for scheduled jobs if SCHEDULER_SECRET is set',
       },
     },
+    config: {
+      audience_source: segmentId 
+        ? `CIO segment ${segmentId} (CUSTOMERIO_BROADCAST_SEGMENT_ID)` 
+        : 'DSQL active subscribers (no segment configured)',
+      campaign_id: process.env.CUSTOMERIO_BROADCAST_CAMPAIGN_ID || 'not set',
+    },
     notes: [
       'Admin calls require valid session cookie and poll_id in body',
       'Scheduled calls auto-select the next scheduled poll, or most recent active poll',
-      'Campaign ID: 8 (CUSTOMERIO_BROADCAST_CAMPAIGN_ID)',
+      'When CUSTOMERIO_BROADCAST_SEGMENT_ID is set, audience comes from that CIO segment',
+      'Segment members are synced to DSQL before broadcast to enable signed vote URLs',
+      'Without segment ID, falls back to all active DSQL subscribers',
     ],
   });
 }

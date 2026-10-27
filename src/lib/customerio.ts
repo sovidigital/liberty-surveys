@@ -5,6 +5,14 @@ interface CustomerioConfig {
   siteId: string;
   apiKey: string;
   appApiKey?: string;
+  environmentId?: string;
+}
+
+export interface CIOSegmentMember {
+  id: string;
+  internalId: string;
+  email: string;
+  attributes: Record<string, unknown>;
 }
 
 let configWarningLogged = false;
@@ -13,16 +21,17 @@ function getConfig(): CustomerioConfig {
   const siteId = process.env.CUSTOMERIO_SITE_ID;
   const apiKey = process.env.CUSTOMERIO_API_KEY;
   const appApiKey = process.env.CUSTOMERIO_APP_API_KEY;
+  const environmentId = process.env.CUSTOMERIO_ENVIRONMENT_ID;
 
   if (!siteId || !apiKey) {
     if (!configWarningLogged) {
       console.warn('[Customer.io] Credentials not set, using mock mode. Set CUSTOMERIO_SITE_ID and CUSTOMERIO_API_KEY to enable.');
       configWarningLogged = true;
     }
-    return { siteId: 'mock', apiKey: 'mock', appApiKey: 'mock' };
+    return { siteId: 'mock', apiKey: 'mock', appApiKey: 'mock', environmentId: 'mock' };
   }
 
-  return { siteId, apiKey, appApiKey };
+  return { siteId, apiKey, appApiKey, environmentId };
 }
 
 function getTrackAuthHeader(): string {
@@ -311,6 +320,116 @@ export async function triggerRecapBroadcast(
   return { subscriberCount: -1 };
 }
 
+// ============================================================================
+// Segment Member Fetching
+// ============================================================================
+
+interface CIOCustomerResponse {
+  customers: Array<{
+    id: string;
+    internal_id: string;
+    identifiers: {
+      id?: string;
+      email?: string;
+      cio_id?: string;
+    };
+    attributes: Record<string, unknown>;
+    unsubscribed: boolean;
+  }>;
+  meta: {
+    pagination: {
+      page: number;
+      size: number;
+      total: number;
+    };
+  };
+}
+
+export async function fetchSegmentMembers(segmentId: number): Promise<CIOSegmentMember[]> {
+  const environmentId = process.env.CUSTOMERIO_ENVIRONMENT_ID;
+  
+  if (!environmentId) {
+    throw new Error('CUSTOMERIO_ENVIRONMENT_ID not configured');
+  }
+  
+  const config = getConfig();
+  
+  if (config.siteId === 'mock') {
+    console.log(`[Customer.io MOCK] Would fetch segment ${segmentId} members`);
+    return [
+      { id: 'mock-1', internalId: 'abc123', email: 'test1@example.com', attributes: {} },
+      { id: 'mock-2', internalId: 'def456', email: 'test2@example.com', attributes: {} },
+    ];
+  }
+  
+  const filter = JSON.stringify([{
+    type: 'segments_negatable',
+    segments: [segmentId],
+    negate: false,
+  }]);
+  const encodedFilter = Buffer.from(filter).toString('base64');
+  
+  const members: CIOSegmentMember[] = [];
+  let page = 1;
+  let hasMore = true;
+  
+  console.log(`[Customer.io] Fetching segment ${segmentId} members...`);
+  
+  while (hasMore) {
+    const url = `${APP_API_BASE}/environments/${environmentId}/customers?page=${page}&filters=${encodeURIComponent(encodedFilter)}`;
+    
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Authorization': getAppAuthHeader(),
+        'Content-Type': 'application/json',
+      },
+    });
+    
+    if (!response.ok) {
+      const error = await response.text();
+      console.error(`[Customer.io] Segment fetch error: ${response.status}`, error);
+      throw new Error(`Failed to fetch segment members: ${response.status} ${error}`);
+    }
+    
+    const data: CIOCustomerResponse = await response.json();
+    
+    for (const customer of data.customers) {
+      if (customer.unsubscribed) {
+        continue;
+      }
+      
+      const email = customer.identifiers.email || 
+                   (customer.attributes.email as string) ||
+                   '';
+      
+      if (!email) {
+        console.warn(`[Customer.io] Skipping customer ${customer.id} without email`);
+        continue;
+      }
+      
+      members.push({
+        id: customer.identifiers.id || customer.id,
+        internalId: customer.internal_id,
+        email,
+        attributes: customer.attributes,
+      });
+    }
+    
+    const { pagination } = data.meta;
+    const totalPages = Math.ceil(pagination.total / 50);
+    hasMore = page < totalPages;
+    page++;
+    
+    if (page % 10 === 0) {
+      console.log(`[Customer.io] Fetched ${members.length} members (page ${page - 1}/${totalPages})`);
+    }
+  }
+  
+  console.log(`[Customer.io] Fetched ${members.length} subscribed members from segment ${segmentId}`);
+  return members;
+}
+
 export const customerio = {
   identifySubscriber,
   trackEvent,
@@ -319,6 +438,7 @@ export const customerio = {
   triggerBroadcast,
   triggerPollBroadcast,
   triggerRecapBroadcast,
+  fetchSegmentMembers,
 };
 
 export default customerio;
