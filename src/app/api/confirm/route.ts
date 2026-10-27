@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 import { identifySubscriber, trackEvent } from '@/lib/customerio';
+import { buildRedirectUrl } from '@/lib/url';
 
 export async function GET(request: NextRequest) {
   try {
@@ -9,7 +10,7 @@ export async function GET(request: NextRequest) {
     const token = searchParams.get('token');
 
     if (!subscriberId || !token) {
-      return NextResponse.redirect(new URL('/confirm?error=invalid', request.url));
+      return NextResponse.redirect(buildRedirectUrl(request, '/confirm?error=invalid'));
     }
 
     const result = await query<{
@@ -26,21 +27,21 @@ export async function GET(request: NextRequest) {
     );
 
     if (result.rows.length === 0) {
-      return NextResponse.redirect(new URL('/confirm?error=not_found', request.url));
+      return NextResponse.redirect(buildRedirectUrl(request, '/confirm?error=not_found'));
     }
 
     const subscriber = result.rows[0];
 
     if (subscriber.status === 'active') {
-      return NextResponse.redirect(new URL('/confirm?status=already_confirmed', request.url));
+      return NextResponse.redirect(buildRedirectUrl(request, '/confirm?status=already_confirmed'));
     }
 
     if (subscriber.confirmation_token !== token) {
-      return NextResponse.redirect(new URL('/confirm?error=invalid_token', request.url));
+      return NextResponse.redirect(buildRedirectUrl(request, '/confirm?error=invalid_token'));
     }
 
     if (subscriber.confirmation_expires_at && new Date() > subscriber.confirmation_expires_at) {
-      return NextResponse.redirect(new URL('/confirm?error=expired', request.url));
+      return NextResponse.redirect(buildRedirectUrl(request, '/confirm?error=expired'));
     }
 
     const now = new Date();
@@ -65,9 +66,9 @@ export async function GET(request: NextRequest) {
       confirmed_at: now.toISOString(),
     });
 
-    return NextResponse.redirect(new URL('/confirm?status=success', request.url));
+    return NextResponse.redirect(buildRedirectUrl(request, '/confirm?status=success'));
   } catch (error) {
     console.error('Confirmation error:', error);
-    return NextResponse.redirect(new URL('/confirm?error=server', request.url));
+    return NextResponse.redirect(buildRedirectUrl(request, '/confirm?error=server'));
   }
 }

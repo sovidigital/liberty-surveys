@@ -3,6 +3,7 @@ import { query } from '@/lib/db';
 import { generateId } from '@/lib/ulid';
 import { verifyVoteSignature } from '@/lib/signatures';
 import { trackEvent, identifySubscriber } from '@/lib/customerio';
+import { buildRedirectUrl } from '@/lib/url';
 import { Poll, PollOption, Subscriber } from '@/types';
 
 export async function GET(request: NextRequest) {
@@ -14,11 +15,11 @@ export async function GET(request: NextRequest) {
     const signature = searchParams.get('sig');
 
     if (!pollId || !optionId || !subscriberId || !signature) {
-      return NextResponse.redirect(new URL('/polls?error=invalid_link', request.url));
+      return NextResponse.redirect(buildRedirectUrl(request, '/polls?error=invalid_link'));
     }
 
     if (!verifyVoteSignature(pollId, optionId, subscriberId, signature)) {
-      return NextResponse.redirect(new URL('/polls?error=invalid_signature', request.url));
+      return NextResponse.redirect(buildRedirectUrl(request, '/polls?error=invalid_signature'));
     }
 
     const subscriberResult = await query<Subscriber>(
@@ -27,13 +28,13 @@ export async function GET(request: NextRequest) {
     );
 
     if (subscriberResult.rows.length === 0) {
-      return NextResponse.redirect(new URL('/polls?error=subscriber_not_found', request.url));
+      return NextResponse.redirect(buildRedirectUrl(request, '/polls?error=subscriber_not_found'));
     }
 
     const subscriber = subscriberResult.rows[0];
 
     if (subscriber.status !== 'active') {
-      return NextResponse.redirect(new URL('/polls?error=not_subscribed', request.url));
+      return NextResponse.redirect(buildRedirectUrl(request, '/polls?error=not_subscribed'));
     }
 
     const pollResult = await query<Poll>(
@@ -42,14 +43,14 @@ export async function GET(request: NextRequest) {
     );
 
     if (pollResult.rows.length === 0) {
-      return NextResponse.redirect(new URL('/polls?error=poll_not_found', request.url));
+      return NextResponse.redirect(buildRedirectUrl(request, '/polls?error=poll_not_found'));
     }
 
     const poll = pollResult.rows[0];
 
     if (poll.status !== 'active') {
       return NextResponse.redirect(
-        new URL(`/polls/${pollId}?error=poll_closed`, request.url)
+        buildRedirectUrl(request, `/polls/${pollId}?error=poll_closed`)
       );
     }
 
@@ -59,7 +60,7 @@ export async function GET(request: NextRequest) {
     );
 
     if (optionResult.rows.length === 0) {
-      return NextResponse.redirect(new URL('/polls?error=invalid_option', request.url));
+      return NextResponse.redirect(buildRedirectUrl(request, '/polls?error=invalid_option'));
     }
 
     const existingVote = await query(
@@ -69,7 +70,7 @@ export async function GET(request: NextRequest) {
 
     if (existingVote.rows.length > 0) {
       return NextResponse.redirect(
-        new URL(`/polls/${pollId}?status=already_voted`, request.url)
+        buildRedirectUrl(request, `/polls/${pollId}?status=already_voted`)
       );
     }
 
@@ -100,18 +101,19 @@ export async function GET(request: NextRequest) {
     });
 
     return NextResponse.redirect(
-      new URL(`/polls/${pollId}?status=voted`, request.url)
+      buildRedirectUrl(request, `/polls/${pollId}?status=voted`)
     );
   } catch (error) {
     console.error('Vote error:', error);
     
     if (error instanceof Error && error.message.includes('unique constraint')) {
-      const pollId = new URL(request.url).searchParams.get('p');
+      const { searchParams: errorParams } = new URL(request.url);
+      const errorPollId = errorParams.get('p');
       return NextResponse.redirect(
-        new URL(`/polls/${pollId}?status=already_voted`, request.url)
+        buildRedirectUrl(request, `/polls/${errorPollId}?status=already_voted`)
       );
     }
     
-    return NextResponse.redirect(new URL('/polls?error=server', request.url));
+    return NextResponse.redirect(buildRedirectUrl(request, '/polls?error=server'));
   }
 }

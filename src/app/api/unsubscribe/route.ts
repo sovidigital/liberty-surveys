@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 import { verifyUnsubscribeToken } from '@/lib/signatures';
 import { identifySubscriber, trackEvent } from '@/lib/customerio';
+import { buildRedirectUrl } from '@/lib/url';
 import { Subscriber } from '@/types';
 
 export async function GET(request: NextRequest) {
@@ -11,7 +12,7 @@ export async function GET(request: NextRequest) {
     const token = searchParams.get('token');
 
     if (!subscriberId || !token) {
-      return NextResponse.redirect(new URL('/unsubscribe?error=invalid', request.url));
+      return NextResponse.redirect(buildRedirectUrl(request, '/unsubscribe?error=invalid'));
     }
 
     const result = await query<Subscriber>(
@@ -20,17 +21,17 @@ export async function GET(request: NextRequest) {
     );
 
     if (result.rows.length === 0) {
-      return NextResponse.redirect(new URL('/unsubscribe?error=not_found', request.url));
+      return NextResponse.redirect(buildRedirectUrl(request, '/unsubscribe?error=not_found'));
     }
 
     const subscriber = result.rows[0];
 
     if (!verifyUnsubscribeToken(subscriberId, subscriber.email, token)) {
-      return NextResponse.redirect(new URL('/unsubscribe?error=invalid_token', request.url));
+      return NextResponse.redirect(buildRedirectUrl(request, '/unsubscribe?error=invalid_token'));
     }
 
     if (subscriber.status === 'unsubscribed') {
-      return NextResponse.redirect(new URL('/unsubscribe?status=already_unsubscribed', request.url));
+      return NextResponse.redirect(buildRedirectUrl(request, '/unsubscribe?status=already_unsubscribed'));
     }
 
     const now = new Date();
@@ -53,9 +54,9 @@ export async function GET(request: NextRequest) {
       unsubscribed_at: now.toISOString(),
     });
 
-    return NextResponse.redirect(new URL('/unsubscribe?status=success', request.url));
+    return NextResponse.redirect(buildRedirectUrl(request, '/unsubscribe?status=success'));
   } catch (error) {
     console.error('Unsubscribe error:', error);
-    return NextResponse.redirect(new URL('/unsubscribe?error=server', request.url));
+    return NextResponse.redirect(buildRedirectUrl(request, '/unsubscribe?error=server'));
   }
 }
