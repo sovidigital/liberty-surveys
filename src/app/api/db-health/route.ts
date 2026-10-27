@@ -6,6 +6,20 @@ export const dynamic = 'force-dynamic';
 export async function GET() {
   const startTime = Date.now();
   
+  const allEnvKeys = Object.keys(process.env);
+  const appEnvKeys = allEnvKeys.filter(k => 
+    k.startsWith('DSQL_') || 
+    k.startsWith('USE_MOCK') || 
+    k.startsWith('CUSTOMERIO_') || 
+    k.startsWith('CONFIRM_') ||
+    k.startsWith('UNSUBSCRIBE_') ||
+    k.startsWith('VOTE_') ||
+    k.startsWith('JWT_') ||
+    k.startsWith('SCHEDULER_') ||
+    k.startsWith('XAI_') ||
+    k.startsWith('NEXT_PUBLIC_')
+  );
+  
   const envFlags = {
     hasDsqlEndpoint: !!process.env.DSQL_ENDPOINT,
     hasDsqlUser: !!process.env.DSQL_USER,
@@ -21,6 +35,8 @@ export async function GET() {
     hasAwsDefaultRegion: !!process.env.AWS_DEFAULT_REGION,
     awsExecutionEnv: process.env.AWS_EXECUTION_ENV || null,
     nodeEnv: process.env.NODE_ENV || null,
+    envKeyCount: allEnvKeys.length,
+    appEnvKeys: appEnvKeys.sort(),
   };
 
   const config = {

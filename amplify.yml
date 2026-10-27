@@ -8,6 +8,12 @@ frontend:
         - npm ci
     build:
       commands:
+        # Write build-time env vars to .env.production for Next.js SSR runtime
+        # Amplify injects env vars into build container but not Lambda runtime
+        # This bridges the gap without exposing values in logs
+        - |
+          env | grep -E '^(DSQL_|USE_MOCK_DB|CUSTOMERIO_|CONFIRM_|UNSUBSCRIBE_|VOTE_|JWT_|SCHEDULER_|XAI_|NEXT_PUBLIC_|NODE_ENV)' >> .env.production || true
+        - echo "Wrote $(wc -l < .env.production) env vars to .env.production"
         - npm run build
   artifacts:
     baseDirectory: .next
