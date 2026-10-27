@@ -1,4 +1,5 @@
 import { NewsArticle, PoliticalLean, TopicCluster } from '@/types';
+import { getLlmTimeoutMs } from './xai';
 
 const USE_MOCK = process.env.USE_MOCK_NEWS === 'true' || process.env.USE_MOCK_DB === 'true';
 
@@ -319,6 +320,10 @@ async function searchWithXai(query: string): Promise<WebSearchResult[]> {
     return [];
   }
   
+  const timeoutMs = getLlmTimeoutMs();
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  
   try {
     const response = await fetch('https://api.x.ai/v1/responses', {
       method: 'POST',
@@ -336,7 +341,10 @@ async function searchWithXai(query: string): Promise<WebSearchResult[]> {
         max_output_tokens: 2048,
         reasoning_effort: 'none',
       }),
+      signal: controller.signal,
     });
+    
+    clearTimeout(timeoutId);
     
     if (!response.ok) {
       console.warn('[NEWS] xAI web search failed:', response.status);
@@ -361,7 +369,12 @@ async function searchWithXai(query: string): Promise<WebSearchResult[]> {
     
     return [];
   } catch (error) {
-    console.warn('[NEWS] xAI web search error:', error);
+    clearTimeout(timeoutId);
+    if (error instanceof Error && error.name === 'AbortError') {
+      console.warn(`[NEWS] xAI web search timed out after ${timeoutMs}ms`);
+    } else {
+      console.warn('[NEWS] xAI web search error:', error);
+    }
     return [];
   }
 }
