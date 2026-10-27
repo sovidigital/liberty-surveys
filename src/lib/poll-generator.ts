@@ -1,4 +1,4 @@
-import { query, transaction } from './db';
+import { query } from './db';
 import { fetchNews, clusterArticlesByTopic, fetchArticlesForTopic } from './news';
 import { generatePoll, checkPollBias, validateCitations, getModelId } from './xai';
 import { generateId } from './ulid';
@@ -9,7 +9,6 @@ import {
   NewsArticle,
   GeneratedPoll,
   EvergreenPoll,
-  PoliticalLean,
 } from '@/types';
 
 // ============================================================================
@@ -19,6 +18,11 @@ import {
 const MAX_RETRIES = 3;
 const MIN_ARTICLES_PER_TOPIC = 4;
 const RECENT_TOPICS_DAYS = 7;
+
+// Amplify SSR Lambda times out at ~30s. We need headroom for response serialization.
+// If we approach this limit, fail fast to evergreen fallback.
+const GENERATION_TIMEOUT_MS = 25000;
+const MAX_ARTICLES_FOR_SPEED = 50; // Fewer articles = faster pipeline
 
 // ============================================================================
 // Topic Selection
@@ -200,15 +204,23 @@ async function saveFetchedArticles(
   articles: NewsArticle[],
   topicCluster?: string
 ): Promise<void> {
-  for (const article of articles) {
-    const id = generateId();
+  if (articles.length === 0) return;
+  
+  // Batch insert for performance - converts 150 sequential queries into 1
+  const BATCH_SIZE = 50;
+  
+  for (let i = 0; i < articles.length; i += BATCH_SIZE) {
+    const batch = articles.slice(i, i + BATCH_SIZE);
+    const values: unknown[] = [];
+    const placeholders: string[] = [];
     
-    await query(
-      `INSERT INTO fetched_articles 
-       (id, generation_run_id, source_name, source_url, article_title, article_description, article_content, published_at, political_lean, topic_cluster)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-      [
-        id,
+    batch.forEach((article, idx) => {
+      const offset = idx * 10;
+      placeholders.push(
+        `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, $${offset + 6}, $${offset + 7}, $${offset + 8}, $${offset + 9}, $${offset + 10})`
+      );
+      values.push(
+        generateId(),
         runId,
         article.source.name,
         article.url,
@@ -217,10 +229,19 @@ async function saveFetchedArticles(
         article.content,
         article.publishedAt,
         article.source.politicalLean,
-        topicCluster || null,
-      ]
+        topicCluster || null
+      );
+    });
+    
+    await query(
+      `INSERT INTO fetched_articles 
+       (id, generation_run_id, source_name, source_url, article_title, article_description, article_content, published_at, political_lean, topic_cluster)
+       VALUES ${placeholders.join(', ')}`,
+      values
     );
   }
+  
+  console.log(`[GENERATOR] Batch-inserted ${articles.length} articles`);
 }
 
 async function createPollFromGenerated(
@@ -285,11 +306,21 @@ async function createPollFromGenerated(
 // Main Generation Pipeline
 // ============================================================================
 
+function checkTimeout(startTime: number, phase: string): void {
+  const elapsed = Date.now() - startTime;
+  if (elapsed > GENERATION_TIMEOUT_MS) {
+    throw new Error(`Generation timeout in ${phase}: ${elapsed}ms elapsed (limit: ${GENERATION_TIMEOUT_MS}ms)`);
+  }
+  console.log(`[GENERATOR] ${phase} - ${elapsed}ms elapsed`);
+}
+
 export async function runPollGeneration(): Promise<GenerationResult> {
   const runDate = new Date();
+  const startTime = Date.now();
   const runId = await createGenerationRun(runDate);
   
   console.log(`[GENERATOR] Starting generation run ${runId} for ${runDate.toISOString()}`);
+  console.log(`[GENERATOR] Timeout limit: ${GENERATION_TIMEOUT_MS}ms`);
   
   let retryCount = 0;
   let lastError: string | undefined;
@@ -297,7 +328,10 @@ export async function runPollGeneration(): Promise<GenerationResult> {
   try {
     await updateGenerationRun(runId, { status: 'fetching_news' as const });
     
-    const articles = await fetchNews({ maxArticles: 150 });
+    // Fetch fewer articles for speed - we only need enough for topic clustering and LLM context
+    const articles = await fetchNews({ maxArticles: MAX_ARTICLES_FOR_SPEED });
+    
+    checkTimeout(startTime, 'after news fetch');
     
     if (articles.length === 0) {
       throw new Error('No news articles fetched');
@@ -308,7 +342,10 @@ export async function runPollGeneration(): Promise<GenerationResult> {
       news_sources_queried: 'NewsAPI,RSS',
     });
     
+    // Save articles in batches for audit trail (non-blocking if we timeout later)
     await saveFetchedArticles(runId, articles);
+    
+    checkTimeout(startTime, 'after article save');
     
     await updateGenerationRun(runId, { status: 'selecting_topic' as const });
     
@@ -350,7 +387,19 @@ export async function runPollGeneration(): Promise<GenerationResult> {
       articles_used_count: topicArticles.length,
     });
     
+    checkTimeout(startTime, 'before LLM generation');
+    
     while (retryCount < MAX_RETRIES) {
+      // Check if we have enough time for another retry
+      const elapsed = Date.now() - startTime;
+      const timeRemaining = GENERATION_TIMEOUT_MS - elapsed;
+      if (timeRemaining < 8000 && retryCount > 0) {
+        // Less than 8s left and we've already tried once - bail to fallback
+        console.log(`[GENERATOR] Only ${timeRemaining}ms remaining, bailing to fallback`);
+        lastError = `Timeout imminent after ${retryCount} retries`;
+        break;
+      }
+      
       try {
         await updateGenerationRun(runId, { 
           status: 'generating' as const,
@@ -361,6 +410,8 @@ export async function runPollGeneration(): Promise<GenerationResult> {
           selectedCluster.topic,
           topicArticles
         );
+        
+        checkTimeout(startTime, 'after poll generation');
         
         await updateGenerationRun(runId, {
           model_used: getModelId(),
@@ -385,6 +436,8 @@ export async function runPollGeneration(): Promise<GenerationResult> {
         }
         
         const biasResult = await checkPollBias(generatedPoll);
+        
+        checkTimeout(startTime, 'after bias check');
         
         await updateGenerationRun(runId, {
           bias_score: biasResult.questionBiasScore,
@@ -469,14 +522,44 @@ export async function runPollGeneration(): Promise<GenerationResult> {
     
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
+    const isTimeout = errorMessage.includes('timeout') || errorMessage.includes('Timeout');
+    
+    console.error('[GENERATOR] Generation error:', errorMessage);
+    
+    // On timeout or critical errors, try evergreen fallback before giving up
+    if (isTimeout || errorMessage.includes('No news articles') || errorMessage.includes('No suitable topic')) {
+      console.log('[GENERATOR] Attempting evergreen fallback after error...');
+      
+      const evergreen = await getEvergreenFallback();
+      
+      if (evergreen) {
+        const fallbackPoll = evergreenToGeneratedPoll(evergreen);
+        const pollId = await createPollFromGenerated(fallbackPoll, runId, false);
+        
+        await updateGenerationRun(runId, {
+          status: 'fallback' as const,
+          generated_poll_id: pollId,
+          used_fallback: true,
+          fallback_reason: `Error during generation: ${errorMessage}. Using evergreen poll.`,
+          completed_at: new Date(),
+        });
+        
+        console.log(`[GENERATOR] Used fallback poll ${pollId} after error`);
+        
+        return {
+          success: true,
+          poll: fallbackPoll,
+          runId,
+          usedFallback: true,
+        };
+      }
+    }
     
     await updateGenerationRun(runId, {
       status: 'failed' as const,
       error_message: errorMessage,
       completed_at: new Date(),
     });
-    
-    console.error('[GENERATOR] Generation failed:', errorMessage);
     
     return {
       success: false,
