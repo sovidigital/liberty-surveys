@@ -72,11 +72,23 @@ export async function GET() {
   try {
     const result = await testConnection();
     
+    let subscriberCount: number | null = null;
+    if (result.ok) {
+      try {
+        const { query } = await import('@/lib/db');
+        const countResult = await query<{ count: string }>('SELECT count(*) as count FROM subscribers');
+        subscriberCount = parseInt(countResult.rows[0]?.count || '0', 10);
+      } catch {
+        subscriberCount = null;
+      }
+    }
+    
     return NextResponse.json({
       ok: result.ok,
       mode: 'dsql',
       error: result.error,
       latency: result.latency,
+      subscriberCount,
       config,
       envFlags,
       timestamp: new Date().toISOString(),

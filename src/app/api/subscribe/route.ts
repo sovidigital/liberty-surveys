@@ -81,7 +81,7 @@ export async function POST(request: NextRequest) {
       if (subscriber.status === 'unsubscribed') {
         try {
           const confirmationToken = generateConfirmationToken(subscriber.id, normalizedEmail);
-          const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+          const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
 
           await query(
             `UPDATE subscribers 
@@ -127,7 +127,7 @@ export async function POST(request: NextRequest) {
       );
     }
     
-    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
 
     await query(
       `INSERT INTO subscribers (id, email, status, confirmation_token, confirmation_expires_at, created_at, updated_at)
@@ -170,8 +170,9 @@ export async function POST(request: NextRequest) {
       timestamp: new Date().toISOString(),
     });
     
+    // TODO: remove production details after subscribe verified
     return NextResponse.json(
-      { error: 'An error occurred. Please try again.', details: process.env.NODE_ENV === 'development' ? errorMessage : undefined },
+      { error: 'An error occurred. Please try again.', details: errorMessage.substring(0, 300) },
       { status: 500 }
     );
   }
