@@ -1,0 +1,31 @@
+@import "tailwindcss";
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+  
+  /* Liberty Surveys Brand Colors */
+  --liberty-charcoal: #1a1a1a;
+  --liberty-red: #e31c23;
+  --liberty-blue: #0066b3;
+  --liberty-white: #ffffff;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+  
+  /* Brand color utilities */
+  --color-liberty-charcoal: var(--liberty-charcoal);
+  --color-liberty-red: var(--liberty-red);
+  --color-liberty-blue: var(--liberty-blue);
+  --color-liberty-white: var(--liberty-white);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Arial, Helvetica, sans-serif;
+}
