@@ -11,7 +11,8 @@
     "generate": "tsx scripts/generate-poll.ts",
     "generate:force": "tsx scripts/generate-poll.ts --force",
     "recap": "tsx scripts/send-recap.ts",
-    "recap:preview": "tsx scripts/send-recap.ts --preview"
+    "recap:preview": "tsx scripts/send-recap.ts --preview",
+    "test:broadcast": "tsx scripts/test-broadcast-scheduler.ts"
   },
   "dependencies": {
     "@aws/aurora-dsql-node-postgres-connector": "^0.1.9",
