@@ -1,0 +1,21 @@
+{
+  "name": "liberty-surveys-poll-generator-lambda",
+  "version": "1.0.0",
+  "description": "Async poll generation Lambda for Liberty Surveys",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "zip": "cd dist && zip -r ../poll-generator.zip ."
+  },
+  "devDependencies": {
+    "@types/aws-lambda": "^8.10.145",
+    "@types/node": "^20",
+    "esbuild": "^0.24.0",
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "@aws/aurora-dsql-node-postgres-connector": "^0.1.9",
+    "pg": "^8.23.1",
+    "ulid": "^3.0.2"
+  }
+}
