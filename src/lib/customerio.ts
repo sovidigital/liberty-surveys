@@ -150,11 +150,17 @@ export async function sendTransactionalEmail(options: TransactionalEmailOptions)
   return result.delivery_id;
 }
 
+export interface BroadcastPerUserData {
+  id: string;
+  [key: string]: unknown;
+}
+
 export interface BroadcastTriggerOptions {
   campaignId: number;
   recipients?: Record<string, unknown>;
   ids?: string[];
   data?: Record<string, unknown>;
+  per_user_data?: BroadcastPerUserData[];
 }
 
 export async function triggerBroadcast(
@@ -171,6 +177,10 @@ export async function triggerBroadcast(
     body.ids = options.ids;
   }
 
+  if (options.per_user_data && options.per_user_data.length > 0) {
+    body.per_user_data = options.per_user_data;
+  }
+
   await appApiRequest(
     'POST',
     `/environments/${environmentId}/campaigns/${options.campaignId}/triggers`,
@@ -179,7 +189,7 @@ export async function triggerBroadcast(
 }
 
 // ============================================================================
-// Daily Poll Broadcast (with briefing)
+// Daily Poll Broadcast (with briefing and per-user vote URLs)
 // ============================================================================
 
 export interface PollBroadcastOption {
@@ -188,10 +198,9 @@ export interface PollBroadcastOption {
   vote_url: string;
 }
 
-export interface PollBroadcastData {
+export interface PollBroadcastSharedData {
   poll_id: string;
   poll_question: string;
-  options: PollBroadcastOption[];
   results_url: string;
   briefing_background?: string;
   briefing_conservative?: string;
@@ -204,8 +213,20 @@ export interface PollBroadcastData {
   }>;
 }
 
+export interface PollBroadcastSubscriberData {
+  subscriber_id: string;
+  email: string;
+  options: PollBroadcastOption[];
+  unsubscribe_url: string;
+}
+
+export interface PollBroadcastInput {
+  sharedData: PollBroadcastSharedData;
+  subscribers: PollBroadcastSubscriberData[];
+}
+
 export async function triggerPollBroadcast(
-  data: PollBroadcastData
+  input: PollBroadcastInput
 ): Promise<{ subscriberCount: number }> {
   const environmentId = process.env.CUSTOMERIO_ENVIRONMENT_ID;
   const campaignId = process.env.CUSTOMERIO_BROADCAST_CAMPAIGN_ID;
@@ -218,16 +239,27 @@ export async function triggerPollBroadcast(
   const config = getConfig();
   
   if (config.siteId === 'mock') {
-    console.log('[Customer.io MOCK] Poll broadcast triggered:', data);
-    return { subscriberCount: 100 };
+    console.log('[Customer.io MOCK] Poll broadcast triggered:', {
+      sharedData: input.sharedData,
+      subscriberCount: input.subscribers.length,
+      sampleSubscriber: input.subscribers[0],
+    });
+    return { subscriberCount: input.subscribers.length };
   }
+  
+  const perUserData: BroadcastPerUserData[] = input.subscribers.map(sub => ({
+    id: sub.subscriber_id,
+    options: sub.options,
+    unsubscribe_url: sub.unsubscribe_url,
+  }));
   
   await triggerBroadcast(environmentId, {
     campaignId: parseInt(campaignId, 10),
-    data: data as unknown as Record<string, unknown>,
+    data: input.sharedData as unknown as Record<string, unknown>,
+    per_user_data: perUserData,
   });
   
-  return { subscriberCount: -1 };
+  return { subscriberCount: input.subscribers.length };
 }
 
 // ============================================================================

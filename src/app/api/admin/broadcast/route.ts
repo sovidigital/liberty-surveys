@@ -2,8 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 import { getSession } from '@/lib/auth';
 import { generateVoteUrl, generateUnsubscribeUrl } from '@/lib/signatures';
-import { triggerBroadcast } from '@/lib/customerio';
-import { Poll, PollOption, Subscriber } from '@/types';
+import { triggerPollBroadcast, PollBroadcastSubscriberData, PollBroadcastSharedData } from '@/lib/customerio';
+import { getRequiredBaseUrl } from '@/lib/url';
+import { Poll, PollOption, PollSource, PollWithBriefing, Subscriber } from '@/types';
 
 async function getTodaysScheduledPoll(): Promise<Poll | null> {
   const pollResult = await query<Poll>(
@@ -71,8 +72,12 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const pollResult = await query<Poll>(
-      "SELECT * FROM polls WHERE id = $1 AND status IN ('scheduled', 'active')",
+    const pollResult = await query<PollWithBriefing>(
+      `SELECT id, question, status, scheduled_for, published_at, closed_at, 
+              created_by, created_at, updated_at,
+              briefing_background, briefing_conservative, briefing_liberal, briefing_centrist,
+              generation_run_id, is_auto_generated
+       FROM polls WHERE id = $1 AND status IN ('scheduled', 'active')`,
       [poll_id]
     );
 
@@ -109,15 +114,34 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
+    let baseUrl: string;
+    try {
+      baseUrl = getRequiredBaseUrl();
+    } catch (error) {
+      console.error('[API] Base URL validation failed:', error);
+      return NextResponse.json(
+        { error: error instanceof Error ? error.message : 'Base URL configuration error' },
+        { status: 500 }
+      );
+    }
+
     const environmentId = process.env.CUSTOMERIO_ENVIRONMENT_ID;
     const broadcastCampaignId = process.env.CUSTOMERIO_BROADCAST_CAMPAIGN_ID;
+
+    const sourcesResult = await query<PollSource>(
+      `SELECT source_name, source_url, article_title 
+       FROM poll_sources 
+       WHERE poll_id = $1 
+       ORDER BY created_at`,
+      [poll_id]
+    );
 
     if (!environmentId || !broadcastCampaignId) {
       console.log('[DEV MODE] Broadcast would be sent with the following data:');
       console.log('Poll:', poll.question);
       console.log('Options:', optionsResult.rows.map(o => o.option_text));
       console.log('Subscribers:', subscribersResult.rows.length);
+      console.log('Sources:', sourcesResult.rows.length);
 
       const sampleSubscriber = subscribersResult.rows[0];
       console.log('\nSample vote URLs for subscriber', sampleSubscriber.id);
@@ -144,33 +168,41 @@ export async function POST(request: NextRequest) {
       });
     }
     
-    console.log(`[API] Broadcast triggered (scheduled: ${isScheduledJob}, poll: ${poll_id})`)
+    console.log(`[API] Broadcast triggered (scheduled: ${isScheduledJob}, poll: ${poll_id})`);
 
     const subscribers = subscribersResult.rows;
-    const perUserData = subscribers.map(sub => {
-      const options = optionsResult.rows.map(opt => ({
+    
+    const sharedData: PollBroadcastSharedData = {
+      poll_id: poll.id,
+      poll_question: poll.question,
+      results_url: `${baseUrl}/polls/${poll.id}`,
+      briefing_background: poll.briefing_background || undefined,
+      briefing_conservative: poll.briefing_conservative || undefined,
+      briefing_liberal: poll.briefing_liberal || undefined,
+      briefing_centrist: poll.briefing_centrist || undefined,
+      sources: sourcesResult.rows.length > 0 
+        ? sourcesResult.rows.map(s => ({
+            name: s.source_name,
+            url: s.source_url,
+            title: s.article_title || s.source_name,
+          }))
+        : undefined,
+    };
+
+    const subscriberData: PollBroadcastSubscriberData[] = subscribers.map(sub => ({
+      subscriber_id: sub.id,
+      email: sub.email,
+      options: optionsResult.rows.map(opt => ({
         id: opt.id,
         text: opt.option_text,
         vote_url: generateVoteUrl(baseUrl, poll.id, opt.id, sub.id),
-      }));
+      })),
+      unsubscribe_url: generateUnsubscribeUrl(baseUrl, sub.id, sub.email),
+    }));
 
-      return {
-        id: sub.id,
-        email: sub.email,
-        poll_question: poll.question,
-        poll_id: poll.id,
-        options,
-        results_url: `${baseUrl}/polls/${poll.id}`,
-        unsubscribe_url: generateUnsubscribeUrl(baseUrl, sub.id, sub.email),
-      };
-    });
-
-    await triggerBroadcast(environmentId, {
-      campaignId: parseInt(broadcastCampaignId, 10),
-      data: {
-        poll_id: poll.id,
-        poll_question: poll.question,
-      },
+    const result = await triggerPollBroadcast({
+      sharedData,
+      subscribers: subscriberData,
     });
 
     await query(
@@ -187,7 +219,7 @@ export async function POST(request: NextRequest) {
       message: 'Broadcast triggered successfully',
       scheduled: isScheduledJob,
       poll_id,
-      subscribers_count: perUserData.length,
+      subscribers_count: result.subscriberCount,
     });
   } catch (error) {
     console.error('Broadcast error:', error);

@@ -3,6 +3,7 @@ import { query } from '@/lib/db';
 import { generateId } from '@/lib/ulid';
 import { generateConfirmationToken, generateConfirmationUrl } from '@/lib/signatures';
 import { identifySubscriber, sendTransactionalEmail } from '@/lib/customerio';
+import { getRequiredBaseUrl } from '@/lib/url';
 
 const RATE_LIMIT_WINDOW = 60 * 60 * 1000; // 1 hour
 const RATE_LIMIT_MAX = 10;
@@ -182,7 +183,14 @@ async function sendConfirmationEmail(
   email: string,
   token: string
 ): Promise<void> {
-  const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
+  let baseUrl: string;
+  try {
+    baseUrl = getRequiredBaseUrl();
+  } catch (error) {
+    console.error('[Email] Cannot send confirmation email - base URL not configured:', error);
+    throw error;
+  }
+  
   const confirmUrl = generateConfirmationUrl(baseUrl, subscriberId, token);
 
   try {
@@ -203,5 +211,6 @@ async function sendConfirmationEmail(
     }
   } catch (error) {
     console.error('Failed to send confirmation email:', error);
+    throw error;
   }
 }
