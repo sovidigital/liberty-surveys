@@ -1,0 +1,232 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: |
+  Liberty Surveys - Async Poll Generation Lambda
+  
+  This stack creates:
+  - Lambda function for async poll generation
+  - IAM role with permissions for DSQL, Secrets Manager, and CloudWatch
+  - Optional: EventBridge rule to trigger Lambda directly (alternative to Amplify route)
+
+Parameters:
+  Environment:
+    Type: String
+    Default: production
+    AllowedValues:
+      - production
+      - staging
+    Description: Deployment environment
+
+  DsqlEndpoint:
+    Type: String
+    Description: Aurora DSQL endpoint (e.g., xxx.dsql.us-east-1.on.aws)
+
+  DsqlRegion:
+    Type: String
+    Default: us-east-1
+    Description: AWS region for DSQL
+
+  XaiApiKeySecretArn:
+    Type: String
+    Description: ARN of the Secrets Manager secret containing the xAI API key
+    Default: ''
+
+  XaiApiKeyEnvValue:
+    Type: String
+    Description: Direct xAI API key (use SecretArn instead for production)
+    Default: ''
+    NoEcho: true
+
+  NewsApiKeySecretArn:
+    Type: String
+    Description: ARN of the Secrets Manager secret containing the NewsAPI key (optional)
+    Default: ''
+
+  LlmTimeoutMs:
+    Type: Number
+    Default: 15000
+    Description: Timeout for individual LLM calls in milliseconds
+
+  SchedulerSecret:
+    Type: String
+    Default: ''
+    NoEcho: true
+    Description: Shared secret for EventBridge scheduler authentication
+
+  EnableDirectEventBridgeTrigger:
+    Type: String
+    Default: 'false'
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Description: |
+      Enable direct EventBridge trigger to Lambda (alternative to Amplify route).
+      If true, creates a rule at 5:00 AM ET daily.
+
+Conditions:
+  UseXaiApiKeySecret: !Not [!Equals [!Ref XaiApiKeySecretArn, '']]
+  UseNewsApiKeySecret: !Not [!Equals [!Ref NewsApiKeySecretArn, '']]
+  HasSchedulerSecret: !Not [!Equals [!Ref SchedulerSecret, '']]
+  EnableEventBridge: !Equals [!Ref EnableDirectEventBridgeTrigger, 'true']
+
+Resources:
+  # IAM Role for Lambda
+  PollGeneratorLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'liberty-surveys-poll-generator-${Environment}'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        # DSQL access via IAM authentication
+        - PolicyName: DsqlAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dsql:DbConnect
+                  - dsql:DbConnectAdmin
+                Resource:
+                  - !Sub 'arn:aws:dsql:${DsqlRegion}:${AWS::AccountId}:cluster/*'
+        # Secrets Manager access (if using secrets)
+        - !If
+          - UseXaiApiKeySecret
+          - PolicyName: SecretsAccess
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - secretsmanager:GetSecretValue
+                  Resource:
+                    - !Ref XaiApiKeySecretArn
+                    - !If [UseNewsApiKeySecret, !Ref NewsApiKeySecretArn, !Ref 'AWS::NoValue']
+          - !Ref 'AWS::NoValue'
+        # CloudWatch Logs (enhanced logging)
+        - PolicyName: CloudWatchLogs
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource:
+                  - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/liberty-surveys-poll-generator*'
+
+  # Lambda Function
+  PollGeneratorLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub 'liberty-surveys-poll-generator'
+      Description: Async poll generation for Liberty Surveys
+      Runtime: nodejs20.x
+      Handler: index.handler
+      Role: !GetAtt PollGeneratorLambdaRole.Arn
+      Timeout: 300  # 5 minutes - plenty of time for generation + retries + fallback
+      MemorySize: 512
+      Code:
+        # Placeholder - actual code uploaded separately via aws lambda update-function-code
+        ZipFile: |
+          exports.handler = async (event) => {
+            console.log('Placeholder handler - deploy actual code with update-function-code');
+            return { statusCode: 500, body: 'Lambda code not deployed' };
+          };
+      Environment:
+        Variables:
+          DSQL_ENDPOINT: !Ref DsqlEndpoint
+          DSQL_REGION: !Ref DsqlRegion
+          DSQL_USER: admin
+          XAI_MODEL: grok-4.7
+          LLM_TIMEOUT_MS: !Ref LlmTimeoutMs
+          NODE_ENV: production
+          # Direct API key (for non-secrets deployments)
+          XAI_API_KEY: !If [UseXaiApiKeySecret, '', !Ref XaiApiKeyEnvValue]
+      Tags:
+        - Key: Project
+          Value: liberty-surveys
+        - Key: Component
+          Value: poll-generator
+        - Key: Environment
+          Value: !Ref Environment
+
+  # CloudWatch Log Group with retention
+  PollGeneratorLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${PollGeneratorLambda}'
+      RetentionInDays: 30
+
+  # EventBridge Rule (optional - direct Lambda trigger)
+  PollGenerationScheduleRule:
+    Type: AWS::Events::Rule
+    Condition: EnableEventBridge
+    Properties:
+      Name: !Sub 'liberty-surveys-poll-generation-${Environment}'
+      Description: Daily poll generation at 5:00 AM ET
+      ScheduleExpression: 'cron(0 5 * * ? *)'
+      State: ENABLED
+      Targets:
+        - Id: poll-generator-lambda
+          Arn: !GetAtt PollGeneratorLambda.Arn
+          Input: !If
+            - HasSchedulerSecret
+            - !Sub '{"forceNew": false, "schedulerSecret": "${SchedulerSecret}"}'
+            - '{"forceNew": false}'
+
+  # Permission for EventBridge to invoke Lambda
+  EventBridgeLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Condition: EnableEventBridge
+    Properties:
+      FunctionName: !Ref PollGeneratorLambda
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt PollGenerationScheduleRule.Arn
+
+  # Permission for Amplify to invoke Lambda (via IAM role)
+  # Note: Amplify's IAM role needs lambda:InvokeFunction permission
+  # This is typically handled by adding the Amplify service role to the policy
+
+Outputs:
+  LambdaFunctionName:
+    Description: Lambda function name for POLL_GENERATOR_LAMBDA_NAME env var
+    Value: !Ref PollGeneratorLambda
+    Export:
+      Name: !Sub '${AWS::StackName}-LambdaName'
+
+  LambdaFunctionArn:
+    Description: Lambda function ARN
+    Value: !GetAtt PollGeneratorLambda.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-LambdaArn'
+
+  LambdaRoleArn:
+    Description: IAM role ARN for the Lambda
+    Value: !GetAtt PollGeneratorLambdaRole.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-RoleArn'
+
+  AmplifyInvokePolicy:
+    Description: |
+      Add this policy to Amplify's service role to allow Lambda invocation.
+      Copy and attach to the Amplify IAM role.
+    Value: !Sub |
+      {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": "lambda:InvokeFunction",
+            "Resource": "${PollGeneratorLambda.Arn}"
+          }
+        ]
+      }

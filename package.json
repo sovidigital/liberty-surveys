@@ -15,6 +15,7 @@
     "test:broadcast": "tsx scripts/test-broadcast-scheduler.ts"
   },
   "dependencies": {
+    "@aws-sdk/client-lambda": "^3.1157.0",
     "@aws/aurora-dsql-node-postgres-connector": "^0.1.9",
     "@fortawesome/fontawesome-svg-core": "^7.3.1",
     "@fortawesome/free-regular-svg-icons": "^7.3.1",

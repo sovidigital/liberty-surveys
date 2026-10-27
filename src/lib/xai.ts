@@ -101,6 +101,7 @@ function parseJsonWithRecovery<T>(jsonStr: string, context: string): T {
 
 const DEFAULT_MODEL = 'grok-4.7';
 const DEFAULT_BIAS_CHECK_MODEL = 'grok-4.7';
+const DEFAULT_LLM_TIMEOUT_MS = 15000; // 15 seconds per LLM call
 
 export function getModelId(): string {
   return process.env.XAI_MODEL || DEFAULT_MODEL;
@@ -108,6 +109,18 @@ export function getModelId(): string {
 
 export function getBiasCheckModelId(): string {
   return process.env.XAI_BIAS_CHECK_MODEL || DEFAULT_BIAS_CHECK_MODEL;
+}
+
+export function getLlmTimeoutMs(): number {
+  const envTimeout = process.env.LLM_TIMEOUT_MS;
+  return envTimeout ? parseInt(envTimeout, 10) : DEFAULT_LLM_TIMEOUT_MS;
+}
+
+export class LlmTimeoutError extends Error {
+  constructor(timeoutMs: number) {
+    super(`LLM call timed out after ${timeoutMs}ms`);
+    this.name = 'LlmTimeoutError';
+  }
 }
 
 // ============================================================================
@@ -159,6 +172,7 @@ async function invokeXaiModel(
     reasoningEffort?: 'none' | 'low' | 'medium' | 'high';
     useWebSearch?: boolean;
     webSearchDomains?: string[];
+    timeoutMs?: number;
   } = {}
 ): Promise<{ text: string; inputTokens: number; outputTokens: number }> {
   const {
@@ -167,6 +181,7 @@ async function invokeXaiModel(
     reasoningEffort = 'low',
     useWebSearch = false,
     webSearchDomains,
+    timeoutMs = getLlmTimeoutMs(),
   } = options;
 
   const apiKey = process.env.XAI_API_KEY;
@@ -194,34 +209,48 @@ async function invokeXaiModel(
     }];
   }
 
-  const response = await fetch('https://api.x.ai/v1/responses', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify(body),
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`xAI API error ${response.status}: ${errorText}`);
+  try {
+    const response = await fetch('https://api.x.ai/v1/responses', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`xAI API error ${response.status}: ${errorText}`);
+    }
+
+    const data: ResponsesResponse = await response.json();
+
+    const textContent = data.output
+      .filter(o => o.type === 'message')
+      .flatMap(o => o.content)
+      .filter(c => c.type === 'text')
+      .map(c => c.text)
+      .join('');
+
+    return {
+      text: textContent,
+      inputTokens: data.usage.input_tokens,
+      outputTokens: data.usage.output_tokens + (data.usage.reasoning_tokens || 0),
+    };
+  } catch (error) {
+    clearTimeout(timeoutId);
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new LlmTimeoutError(timeoutMs);
+    }
+    throw error;
   }
-
-  const data: ResponsesResponse = await response.json();
-
-  const textContent = data.output
-    .filter(o => o.type === 'message')
-    .flatMap(o => o.content)
-    .filter(c => c.type === 'text')
-    .map(c => c.text)
-    .join('');
-
-  return {
-    text: textContent,
-    inputTokens: data.usage.input_tokens,
-    outputTokens: data.usage.output_tokens + (data.usage.reasoning_tokens || 0),
-  };
 }
 
 // ============================================================================

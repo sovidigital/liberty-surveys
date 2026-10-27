@@ -1,6 +1,6 @@
 import { query } from './db';
 import { fetchNews, clusterArticlesByTopic, fetchArticlesForTopic } from './news';
-import { generatePoll, checkPollBias, validateCitations, getModelId } from './xai';
+import { generatePoll, checkPollBias, validateCitations, getModelId, LlmTimeoutError } from './xai';
 import { generateId } from './ulid';
 import {
   GenerationRun,
@@ -387,7 +387,9 @@ export async function runPollGeneration(): Promise<GenerationResult> {
       articles_used_count: topicArticles.length,
     });
     
-    checkTimeout(startTime, 'before LLM generation');
+checkTimeout(startTime, 'before LLM generation');
+    
+    let llmTimedOut = false;
     
     while (retryCount < MAX_RETRIES) {
       // Check if we have enough time for another retry
@@ -468,13 +470,26 @@ export async function runPollGeneration(): Promise<GenerationResult> {
         
       } catch (error) {
         retryCount++;
+        const isTimeout = error instanceof LlmTimeoutError;
         lastError = error instanceof Error ? error.message : String(error);
-        console.error(`[GENERATOR] Attempt ${retryCount} failed:`, lastError);
+        
+        if (isTimeout) {
+          llmTimedOut = true;
+          console.error(`[GENERATOR] LLM timeout on attempt ${retryCount}:`, lastError);
+        } else {
+          console.error(`[GENERATOR] Attempt ${retryCount} failed:`, lastError);
+        }
         
         await updateGenerationRun(runId, {
           retry_count: retryCount,
           error_message: lastError,
         });
+        
+        // On LLM timeout, immediately fall through to evergreen (don't waste time retrying)
+        if (isTimeout) {
+          console.log('[GENERATOR] LLM timed out, falling through to evergreen');
+          break;
+        }
         
         if (retryCount >= MAX_RETRIES) {
           break;
@@ -482,7 +497,10 @@ export async function runPollGeneration(): Promise<GenerationResult> {
       }
     }
     
-    console.log('[GENERATOR] All retries exhausted, using fallback');
+    const fallbackReasonPrefix = llmTimedOut 
+      ? 'LLM call timed out' 
+      : `Generation failed after ${retryCount} attempts`;
+    console.log(`[GENERATOR] ${fallbackReasonPrefix}, using evergreen fallback`);
     
     const evergreen = await getEvergreenFallback();
     
@@ -494,7 +512,7 @@ export async function runPollGeneration(): Promise<GenerationResult> {
         status: 'fallback' as const,
         generated_poll_id: pollId,
         used_fallback: true,
-        fallback_reason: `Generation failed after ${MAX_RETRIES} attempts: ${lastError}. Using evergreen poll.`,
+        fallback_reason: `${fallbackReasonPrefix}: ${lastError}. Using evergreen poll.`,
         completed_at: new Date(),
       });
       
