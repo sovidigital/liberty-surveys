@@ -88,9 +88,18 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ polls: pollsWithData, total });
   } catch (error) {
-    console.error('Get polls error:', error);
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    const errorName = error instanceof Error ? error.name : 'Unknown';
+    
+    console.error('[API /polls GET]', {
+      error: errorName,
+      message: errorMessage,
+      stack: error instanceof Error ? error.stack?.split('\n').slice(0, 5).join('\n') : '',
+      timestamp: new Date().toISOString(),
+    });
+    
     return NextResponse.json(
-      { error: 'Failed to fetch polls' },
+      { error: 'Failed to fetch polls', details: process.env.NODE_ENV === 'development' ? errorMessage : undefined },
       { status: 500 }
     );
   }
@@ -181,9 +190,18 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ poll }, { status: 201 });
   } catch (error) {
-    console.error('Create poll error:', error);
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    const errorName = error instanceof Error ? error.name : 'Unknown';
+    
+    console.error('[API /polls POST]', {
+      error: errorName,
+      message: errorMessage,
+      stack: error instanceof Error ? error.stack?.split('\n').slice(0, 5).join('\n') : '',
+      timestamp: new Date().toISOString(),
+    });
+    
     return NextResponse.json(
-      { error: 'Failed to create poll' },
+      { error: 'Failed to create poll', details: process.env.NODE_ENV === 'development' ? errorMessage : undefined },
       { status: 500 }
     );
   }

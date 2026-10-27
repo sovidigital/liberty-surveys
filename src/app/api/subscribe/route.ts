@@ -114,10 +114,17 @@ export async function POST(request: NextRequest) {
       [subscriberId, normalizedEmail, confirmationToken, expiresAt]
     );
 
-    await identifySubscriber(subscriberId, {
-      email: normalizedEmail,
-      subscription_status: 'pending',
-    });
+    try {
+      await identifySubscriber(subscriberId, {
+        email: normalizedEmail,
+        subscription_status: 'pending',
+      });
+    } catch (cioError) {
+      console.warn('[API /subscribe] Customer.io identify failed (non-fatal):', {
+        error: cioError instanceof Error ? cioError.message : String(cioError),
+        subscriberId,
+      });
+    }
 
     await sendConfirmationEmail(subscriberId, normalizedEmail, confirmationToken);
 
@@ -125,9 +132,18 @@ export async function POST(request: NextRequest) {
       message: 'Please check your email to confirm your subscription.',
     });
   } catch (error) {
-    console.error('Subscribe error:', error);
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    const errorName = error instanceof Error ? error.name : 'Unknown';
+    
+    console.error('[API /subscribe POST]', {
+      error: errorName,
+      message: errorMessage,
+      stack: error instanceof Error ? error.stack?.split('\n').slice(0, 5).join('\n') : '',
+      timestamp: new Date().toISOString(),
+    });
+    
     return NextResponse.json(
-      { error: 'An error occurred. Please try again.' },
+      { error: 'An error occurred. Please try again.', details: process.env.NODE_ENV === 'development' ? errorMessage : undefined },
       { status: 500 }
     );
   }

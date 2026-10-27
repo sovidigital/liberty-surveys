@@ -2,13 +2,39 @@ import { Pool, PoolClient, QueryResult, QueryResultRow } from 'pg';
 import { AuroraDSQLPool } from '@aws/aurora-dsql-node-postgres-connector';
 
 let pool: Pool | AuroraDSQLPool | null = null;
+let connectionError: Error | null = null;
+
+function logError(context: string, error: unknown): void {
+  const errorMessage = error instanceof Error ? error.message : String(error);
+  const errorName = error instanceof Error ? error.name : 'Unknown';
+  const errorStack = error instanceof Error ? error.stack?.split('\n').slice(0, 3).join('\n') : '';
+  
+  console.error(`[DB ${context}]`, {
+    error: errorName,
+    message: errorMessage,
+    stack: errorStack,
+    timestamp: new Date().toISOString(),
+  });
+}
+
+function logInfo(context: string, message: string, data?: Record<string, unknown>): void {
+  console.log(`[DB ${context}]`, {
+    message,
+    ...data,
+    timestamp: new Date().toISOString(),
+  });
+}
 
 async function getPool(): Promise<Pool | AuroraDSQLPool> {
+  if (connectionError) {
+    throw connectionError;
+  }
+
   if (!pool) {
     const useMockDb = process.env.USE_MOCK_DB === 'true';
 
     if (useMockDb) {
-      console.warn('USE_MOCK_DB=true, using mock database');
+      logInfo('INIT', 'Using mock database (USE_MOCK_DB=true)');
       return createMockPool();
     }
 
@@ -17,22 +43,38 @@ async function getPool(): Promise<Pool | AuroraDSQLPool> {
     const region = process.env.DSQL_REGION || process.env.AWS_REGION || 'us-east-1';
 
     if (!endpoint) {
-      throw new Error('DSQL_ENDPOINT environment variable is not set. Set DSQL_ENDPOINT to your Aurora DSQL cluster endpoint.');
+      connectionError = new Error(
+        'DSQL_ENDPOINT not set. Configure DSQL_ENDPOINT in Amplify environment variables.'
+      );
+      logError('INIT', connectionError);
+      throw connectionError;
     }
 
-    // AuroraDSQLPool automatically handles IAM authentication token generation
-    // AWS credentials are picked up from the environment (Amplify WEB_COMPUTE runtime)
-    pool = new AuroraDSQLPool({
-      host: endpoint,
-      user,
-      region,
-      database: 'postgres',
-      max: 10,
-      idleTimeoutMillis: 30000,
-      connectionTimeoutMillis: 10000,
-    });
+    logInfo('INIT', 'Configuring DSQL pool', { endpoint, user, region });
 
-    console.log(`DSQL pool configured for ${endpoint} (region: ${region}, user: ${user})`);
+    try {
+      pool = new AuroraDSQLPool({
+        host: endpoint,
+        user,
+        region,
+        database: 'postgres',
+        max: 10,
+        idleTimeoutMillis: 30000,
+        connectionTimeoutMillis: 15000,
+        logger: {
+          warn: (msg: string) => console.warn(`[DSQL] ${msg}`),
+          error: (msg: string) => console.error(`[DSQL] ${msg}`),
+        },
+      });
+
+      logInfo('INIT', 'DSQL pool created successfully', { endpoint, region, user });
+    } catch (err) {
+      connectionError = new Error(
+        `Failed to create DSQL pool: ${err instanceof Error ? err.message : String(err)}`
+      );
+      logError('INIT', connectionError);
+      throw connectionError;
+    }
   }
 
   return pool;
@@ -42,20 +84,49 @@ export async function query<T extends QueryResultRow = QueryResultRow>(
   text: string,
   params?: unknown[]
 ): Promise<QueryResult<T>> {
-  const client = await getPool();
+  const queryId = Math.random().toString(36).substring(2, 8);
   const start = Date.now();
+  const textPreview = text.substring(0, 100).replace(/\s+/g, ' ');
 
   try {
+    const client = await getPool();
     const result = await client.query<T>(text, params);
     const duration = Date.now() - start;
 
-    if (process.env.NODE_ENV === 'development') {
-      console.log('Executed query', { text: text.substring(0, 100), duration, rows: result.rowCount });
+    if (process.env.NODE_ENV === 'development' || duration > 1000) {
+      logInfo('QUERY', `[${queryId}] OK`, { 
+        query: textPreview, 
+        duration: `${duration}ms`, 
+        rows: result.rowCount 
+      });
     }
 
     return result;
   } catch (error) {
-    console.error('Database query error:', { text: text.substring(0, 100), error });
+    const duration = Date.now() - start;
+    
+    logError('QUERY', {
+      message: `[${queryId}] Query failed after ${duration}ms`,
+      query: textPreview,
+      error: error instanceof Error ? error.message : String(error),
+      errorType: error instanceof Error ? error.name : 'Unknown',
+    } as unknown as Error);
+
+    if (error instanceof Error) {
+      if (error.message.includes('credential') || 
+          error.message.includes('token') ||
+          error.message.includes('IAM') ||
+          error.message.includes('authorization')) {
+        throw new Error('Database authentication failed. Check IAM role configuration.');
+      }
+      if (error.message.includes('timeout') || error.message.includes('ETIMEDOUT')) {
+        throw new Error('Database connection timed out. Check network configuration.');
+      }
+      if (error.message.includes('ENOTFOUND') || error.message.includes('getaddrinfo')) {
+        throw new Error('Database host not found. Check DSQL_ENDPOINT configuration.');
+      }
+    }
+
     throw error;
   }
 }
@@ -87,6 +158,21 @@ export async function closePool(): Promise<void> {
   if (pool) {
     await pool.end();
     pool = null;
+  }
+  connectionError = null;
+}
+
+export async function testConnection(): Promise<{ ok: boolean; error?: string; latency?: number }> {
+  const start = Date.now();
+  try {
+    await query('SELECT 1 as ping');
+    return { ok: true, latency: Date.now() - start };
+  } catch (error) {
+    return { 
+      ok: false, 
+      error: error instanceof Error ? error.message : String(error),
+      latency: Date.now() - start,
+    };
   }
 }
 
@@ -173,13 +259,13 @@ function createMockPool(): Pool {
 
   const mockPool = {
     query: async (text: string, params?: unknown[]): Promise<QueryResult> => {
-      console.log('[MOCK DB] Query:', text.substring(0, 80), params);
+      logInfo('MOCK', 'Query', { query: text.substring(0, 80), params: params?.length });
 
       const textLower = text.toLowerCase();
       let rows: Record<string, unknown>[] = [];
 
       if (textLower.includes('from polls') && textLower.includes('select')) {
-        if (params && params[0]) {
+        if (params && params[0] && typeof params[0] === 'string' && params[0].startsWith('01')) {
           rows = mockPolls.filter(p => p.id === params[0]);
         } else if (textLower.includes('active') || textLower.includes('closed')) {
           rows = mockPolls.filter(p => p.status === 'active' || p.status === 'closed');
@@ -187,13 +273,28 @@ function createMockPool(): Pool {
           rows = [...mockPolls];
         }
       } else if (textLower.includes('from poll_options') && textLower.includes('select')) {
-        const pollId = params?.[0] as string;
-        const opts = mockOptions.filter(o => o.poll_id === pollId);
-        const voteCounts = new Map<string, number>();
-        mockVotes.filter(v => v.poll_id === pollId).forEach(v => {
-          voteCounts.set(v.option_id, (voteCounts.get(v.option_id) || 0) + 1);
-        });
-        rows = opts.map(o => ({ ...o, vote_count: voteCounts.get(o.id) || 0 }));
+        if (params?.[0] && Array.isArray(params[0])) {
+          const pollIds = params[0] as string[];
+          rows = mockOptions.filter(o => pollIds.includes(o.poll_id));
+        } else {
+          const pollId = params?.[0] as string;
+          rows = mockOptions.filter(o => o.poll_id === pollId);
+        }
+      } else if (textLower.includes('from votes') && textLower.includes('select')) {
+        if (params?.[0] && Array.isArray(params[0])) {
+          const pollIds = params[0] as string[];
+          const voteCounts = new Map<string, number>();
+          mockVotes.filter(v => pollIds.includes(v.poll_id)).forEach(v => {
+            const key = `${v.poll_id}:${v.option_id}`;
+            voteCounts.set(key, (voteCounts.get(key) || 0) + 1);
+          });
+          rows = Array.from(voteCounts.entries()).map(([key, count]) => {
+            const [poll_id, option_id] = key.split(':');
+            return { poll_id, option_id, count: count.toString() };
+          });
+        } else if (textLower.includes('count')) {
+          rows = [{ count: mockVotes.length.toString() }];
+        }
       } else if (textLower.includes('from poll_sources') && textLower.includes('select')) {
         const pollId = params?.[0] as string;
         rows = mockSources.filter(s => s.poll_id === pollId);
@@ -203,21 +304,27 @@ function createMockPool(): Pool {
             { status: 'active', count: '3' },
             { status: 'pending', count: '1' },
           ];
+        } else if (params?.[0]) {
+          rows = mockSubscribers.filter(s => s.email === params[0]);
         } else {
           rows = [...mockSubscribers];
         }
-      } else if (textLower.includes('from votes') && textLower.includes('count')) {
-        rows = [{ count: mockVotes.length.toString() }];
+      } else if (textLower.includes('count(*)') && textLower.includes('from polls')) {
+        rows = [{ count: mockPolls.length.toString() }];
       } else if (textLower.includes('from generation_runs')) {
         rows = [];
       } else if (textLower.includes('from evergreen_polls')) {
+        rows = [];
+      } else if (textLower.includes('insert into subscribers')) {
+        rows = [];
+      } else if (textLower.includes('update subscribers')) {
         rows = [];
       }
 
       return {
         rows,
         rowCount: rows.length,
-        command: 'SELECT',
+        command: textLower.includes('select') ? 'SELECT' : textLower.includes('insert') ? 'INSERT' : 'UPDATE',
         oid: 0,
         fields: [],
       } as QueryResult;

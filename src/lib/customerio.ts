@@ -7,17 +7,19 @@ interface CustomerioConfig {
   appApiKey?: string;
 }
 
+let configWarningLogged = false;
+
 function getConfig(): CustomerioConfig {
   const siteId = process.env.CUSTOMERIO_SITE_ID;
   const apiKey = process.env.CUSTOMERIO_API_KEY;
   const appApiKey = process.env.CUSTOMERIO_APP_API_KEY;
 
   if (!siteId || !apiKey) {
-    if (process.env.NODE_ENV === 'development') {
-      console.warn('[Customer.io] Credentials not set, using mock mode');
-      return { siteId: 'mock', apiKey: 'mock', appApiKey: 'mock' };
+    if (!configWarningLogged) {
+      console.warn('[Customer.io] Credentials not set, using mock mode. Set CUSTOMERIO_SITE_ID and CUSTOMERIO_API_KEY to enable.');
+      configWarningLogged = true;
     }
-    throw new Error('CUSTOMERIO_SITE_ID and CUSTOMERIO_API_KEY must be set');
+    return { siteId: 'mock', apiKey: 'mock', appApiKey: 'mock' };
   }
 
   return { siteId, apiKey, appApiKey };
