@@ -150,7 +150,11 @@ export async function sendTransactionalEmail(options: TransactionalEmailOptions)
   return result.delivery_id;
 }
 
-export interface BroadcastPerUserData {
+// ============================================================================
+// Broadcast Trigger (Low-level)
+// ============================================================================
+
+export interface BroadcastPerUserDataEntry {
   id: string;
   data: Record<string, unknown>;
 }
@@ -159,7 +163,7 @@ export interface BroadcastTriggerOptions {
   campaignId: number;
   recipients?: Record<string, unknown>;
   ids?: string[];
-  perUserData?: BroadcastPerUserData[];
+  perUserData?: BroadcastPerUserDataEntry[];
   data?: Record<string, unknown>;
   idIgnoreMissing?: boolean;
   emailIgnoreMissing?: boolean;
@@ -206,24 +210,36 @@ export interface PollBroadcastOption {
   vote_url: string;
 }
 
-export interface PollBroadcastData {
+export interface PollBroadcastSource {
+  name: string;
+  url: string;
+  title: string;
+}
+
+export interface PollBroadcastSharedData {
   poll_id: string;
   poll_question: string;
-  options: PollBroadcastOption[];
   results_url: string;
   briefing_background?: string;
   briefing_conservative?: string;
   briefing_liberal?: string;
   briefing_centrist?: string;
-  sources?: Array<{
-    name: string;
-    url: string;
-    title: string;
-  }>;
+  sources?: PollBroadcastSource[];
+}
+
+export interface PollBroadcastSubscriberData {
+  id: string;
+  options: PollBroadcastOption[];
+  unsubscribe_url: string;
+}
+
+export interface TriggerPollBroadcastInput {
+  sharedData: PollBroadcastSharedData;
+  subscribers: PollBroadcastSubscriberData[];
 }
 
 export async function triggerPollBroadcast(
-  data: PollBroadcastData
+  input: TriggerPollBroadcastInput
 ): Promise<{ subscriberCount: number }> {
   const campaignId = process.env.CUSTOMERIO_BROADCAST_CAMPAIGN_ID;
   
@@ -235,16 +251,29 @@ export async function triggerPollBroadcast(
   const config = getConfig();
   
   if (config.siteId === 'mock') {
-    console.log('[Customer.io MOCK] Poll broadcast triggered:', data);
-    return { subscriberCount: 100 };
+    console.log('[Customer.io MOCK] Poll broadcast triggered:', {
+      sharedData: input.sharedData,
+      subscriberCount: input.subscribers.length,
+    });
+    return { subscriberCount: input.subscribers.length };
   }
+  
+  const perUserData: BroadcastPerUserDataEntry[] = input.subscribers.map(sub => ({
+    id: sub.id,
+    data: {
+      options: sub.options,
+      unsubscribe_url: sub.unsubscribe_url,
+    },
+  }));
   
   await triggerBroadcast({
     campaignId: parseInt(campaignId, 10),
-    data: data as unknown as Record<string, unknown>,
+    data: input.sharedData as unknown as Record<string, unknown>,
+    perUserData,
+    idIgnoreMissing: true,
   });
   
-  return { subscriberCount: -1 };
+  return { subscriberCount: input.subscribers.length };
 }
 
 // ============================================================================
