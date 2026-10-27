@@ -323,35 +323,33 @@ export async function triggerRecapBroadcast(
 // ============================================================================
 // Segment Member Fetching
 // ============================================================================
+// 
+// Uses App API endpoint: GET /v1/segments/{segment_id}/membership
+// Docs: https://docs.customer.io/integrations/api/app/tag/segments/
+// Auth: Bearer CUSTOMERIO_APP_API_KEY (same as transactional sends)
+// 
+// NOTE: This does NOT use /environments/{env_id}/customers (Fly API) which
+// requires different authentication and would 404 on api.customer.io.
+// ============================================================================
 
-interface CIOCustomerResponse {
-  customers: Array<{
+interface CIOSegmentMembershipResponse {
+  ids: string[];
+  next: string;
+}
+
+interface CIOCustomerAttributesResponse {
+  customer: {
     id: string;
-    internal_id: string;
     identifiers: {
       id?: string;
       email?: string;
       cio_id?: string;
     };
     attributes: Record<string, unknown>;
-    unsubscribed: boolean;
-  }>;
-  meta: {
-    pagination: {
-      page: number;
-      size: number;
-      total: number;
-    };
   };
 }
 
 export async function fetchSegmentMembers(segmentId: number): Promise<CIOSegmentMember[]> {
-  const environmentId = process.env.CUSTOMERIO_ENVIRONMENT_ID;
-  
-  if (!environmentId) {
-    throw new Error('CUSTOMERIO_ENVIRONMENT_ID not configured');
-  }
-  
   const config = getConfig();
   
   if (config.siteId === 'mock') {
@@ -362,71 +360,76 @@ export async function fetchSegmentMembers(segmentId: number): Promise<CIOSegment
     ];
   }
   
-  const filter = JSON.stringify([{
-    type: 'segments_negatable',
-    segments: [segmentId],
-    negate: false,
-  }]);
-  const encodedFilter = Buffer.from(filter).toString('base64');
-  
   const members: CIOSegmentMember[] = [];
-  let page = 1;
-  let hasMore = true;
+  let cursor: string | null = null;
   
-  console.log(`[Customer.io] Fetching segment ${segmentId} members...`);
+  console.log(`[Customer.io] Fetching segment ${segmentId} members via App API...`);
   
-  while (hasMore) {
-    const url = `${APP_API_BASE}/environments/${environmentId}/customers?page=${page}&filters=${encodeURIComponent(encodedFilter)}`;
+  do {
+    const url = cursor 
+      ? `${APP_API_BASE}/segments/${segmentId}/membership?start=${cursor}`
+      : `${APP_API_BASE}/segments/${segmentId}/membership`;
     
     const response = await fetch(url, {
       method: 'GET',
       headers: {
         'Authorization': getAppAuthHeader(),
-        'Content-Type': 'application/json',
       },
     });
     
     if (!response.ok) {
       const error = await response.text();
-      console.error(`[Customer.io] Segment fetch error: ${response.status}`, error);
+      console.error(`[Customer.io] Segment membership fetch error: ${response.status}`, error);
       throw new Error(`Failed to fetch segment members: ${response.status} ${error}`);
     }
     
-    const data: CIOCustomerResponse = await response.json();
+    const data: CIOSegmentMembershipResponse = await response.json();
     
-    for (const customer of data.customers) {
-      if (customer.unsubscribed) {
-        continue;
+    for (const customerId of data.ids) {
+      try {
+        const attrResponse = await fetch(`${APP_API_BASE}/customers/${customerId}/attributes`, {
+          method: 'GET',
+          headers: {
+            'Authorization': getAppAuthHeader(),
+          },
+        });
+        
+        if (!attrResponse.ok) {
+          console.warn(`[Customer.io] Failed to fetch attributes for ${customerId}`);
+          continue;
+        }
+        
+        const attrData: CIOCustomerAttributesResponse = await attrResponse.json();
+        const customer = attrData.customer;
+        
+        const email = customer.identifiers.email || 
+                     (customer.attributes.email as string) ||
+                     '';
+        
+        if (!email) {
+          console.warn(`[Customer.io] Skipping customer ${customerId} without email`);
+          continue;
+        }
+        
+        members.push({
+          id: customer.identifiers.id || customerId,
+          internalId: customer.identifiers.cio_id || customerId,
+          email,
+          attributes: customer.attributes,
+        });
+      } catch (err) {
+        console.warn(`[Customer.io] Error fetching customer ${customerId}:`, err);
       }
-      
-      const email = customer.identifiers.email || 
-                   (customer.attributes.email as string) ||
-                   '';
-      
-      if (!email) {
-        console.warn(`[Customer.io] Skipping customer ${customer.id} without email`);
-        continue;
-      }
-      
-      members.push({
-        id: customer.identifiers.id || customer.id,
-        internalId: customer.internal_id,
-        email,
-        attributes: customer.attributes,
-      });
     }
     
-    const { pagination } = data.meta;
-    const totalPages = Math.ceil(pagination.total / 50);
-    hasMore = page < totalPages;
-    page++;
+    cursor = data.next || null;
     
-    if (page % 10 === 0) {
-      console.log(`[Customer.io] Fetched ${members.length} members (page ${page - 1}/${totalPages})`);
+    if (members.length % 50 === 0 && members.length > 0) {
+      console.log(`[Customer.io] Fetched ${members.length} members so far...`);
     }
-  }
+  } while (cursor);
   
-  console.log(`[Customer.io] Fetched ${members.length} subscribed members from segment ${segmentId}`);
+  console.log(`[Customer.io] Fetched ${members.length} members from segment ${segmentId}`);
   return members;
 }
 

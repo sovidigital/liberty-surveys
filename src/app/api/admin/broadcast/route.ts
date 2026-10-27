@@ -12,6 +12,14 @@ interface LocalSubscriber {
   email: string;
 }
 
+/**
+ * Upsert segment members into DSQL.
+ * 
+ * IMPORTANT: To avoid creating duplicate CIO people:
+ * 1. First check if email already exists in DSQL - use existing DSQL ID
+ * 2. If not, use the CIO person's identifiers.id as the DSQL subscriber ID
+ * 3. Only identify back to CIO if we had to generate a new ID (rare)
+ */
 async function upsertSegmentMembers(members: CIOSegmentMember[]): Promise<LocalSubscriber[]> {
   const results: LocalSubscriber[] = [];
   
@@ -41,36 +49,49 @@ async function upsertSegmentMembers(members: CIOSegmentMember[]): Promise<LocalS
       
       results.push({ id: sub.id, email });
     } else {
-      const cioIdClean = member.internalId.startsWith('cio_') 
-        ? member.internalId.slice(4) 
-        : member.internalId;
-      const subscriberId = cioIdClean.length >= 8 ? cioIdClean : generateId();
+      // Use CIO person's external ID (member.id) to avoid creating duplicates
+      // member.id is identifiers.id from CIO, which is what Track API uses
+      const subscriberId = member.id && member.id.length > 0 ? member.id : generateId();
+      const needsIdentify = !member.id || member.id.length === 0;
       
       const idConflict = await query<{ id: string }>(
         'SELECT id FROM subscribers WHERE id = $1',
         [subscriberId]
       );
-      const finalId = idConflict.rows.length > 0 ? generateId() : subscriberId;
+      
+      if (idConflict.rows.length > 0) {
+        // ID exists but email doesn't - update email
+        await query(
+          `UPDATE subscribers SET email = $1, updated_at = NOW() WHERE id = $2`,
+          [email, subscriberId]
+        );
+        console.log(`[Broadcast] Updated subscriber ${subscriberId} email to ${email}`);
+        results.push({ id: subscriberId, email });
+        continue;
+      }
       
       await query(
         `INSERT INTO subscribers (id, email, status, subscribed_at, created_at, updated_at)
          VALUES ($1, $2, 'active', NOW(), NOW(), NOW())`,
-        [finalId, email]
+        [subscriberId, email]
       );
       
-      console.log(`[Broadcast] Created subscriber ${finalId} (${email}) from CIO segment`);
+      console.log(`[Broadcast] Created subscriber ${subscriberId} (${email}) from CIO segment`);
       
-      try {
-        await identifySubscriber(finalId, {
-          email,
-          subscription_status: 'active',
-          subscribed_at: Math.floor(Date.now() / 1000),
-        });
-      } catch (err) {
-        console.warn(`[Broadcast] Failed to identify ${finalId} back to CIO:`, err);
+      // Only identify back if we generated an ID (shouldn't happen normally)
+      if (needsIdentify) {
+        try {
+          await identifySubscriber(subscriberId, {
+            email,
+            subscription_status: 'active',
+            subscribed_at: Math.floor(Date.now() / 1000),
+          });
+        } catch (err) {
+          console.warn(`[Broadcast] Failed to identify ${subscriberId} to CIO:`, err);
+        }
       }
       
-      results.push({ id: finalId, email });
+      results.push({ id: subscriberId, email });
     }
   }
   
