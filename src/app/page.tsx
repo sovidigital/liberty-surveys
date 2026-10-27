@@ -1,7 +1,6 @@
 import Link from 'next/link';
 import Image from 'next/image';
 import { SignupForm } from '@/components/SignupForm';
-import { AdUnit } from '@/components/AdUnit';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faEnvelope, faCheckToSlot, faChartBar } from '@fortawesome/free-solid-svg-icons';
 
@@ -101,14 +100,6 @@ export default function HomePage() {
               </p>
             </div>
           </div>
-        </div>
-      </section>
-
-      {/* Ad Unit - Between sections */}
-      <section className="py-4 bg-gray-100">
-        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
-          {/* Ad slot ID placeholder: Replace with real slot from AdSense console */}
-          <AdUnit slot={process.env.NEXT_PUBLIC_ADSENSE_SLOT_HOME} format="horizontal" className="min-h-[90px]" />
         </div>
       </section>
 
