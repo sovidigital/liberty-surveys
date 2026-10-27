@@ -201,19 +201,13 @@ export async function triggerBroadcast(
 }
 
 // ============================================================================
-// Daily Poll Broadcast (with briefing)
+// Daily Poll Broadcast (with briefing and per-user vote URLs)
 // ============================================================================
 
 export interface PollBroadcastOption {
   id: string;
   text: string;
   vote_url: string;
-}
-
-export interface PollBroadcastSource {
-  name: string;
-  url: string;
-  title: string;
 }
 
 export interface PollBroadcastSharedData {
@@ -224,22 +218,27 @@ export interface PollBroadcastSharedData {
   briefing_conservative?: string;
   briefing_liberal?: string;
   briefing_centrist?: string;
-  sources?: PollBroadcastSource[];
+  sources?: Array<{
+    name: string;
+    url: string;
+    title: string;
+  }>;
 }
 
 export interface PollBroadcastSubscriberData {
-  id: string;
+  subscriber_id: string;
+  email: string;
   options: PollBroadcastOption[];
   unsubscribe_url: string;
 }
 
-export interface TriggerPollBroadcastInput {
+export interface PollBroadcastInput {
   sharedData: PollBroadcastSharedData;
   subscribers: PollBroadcastSubscriberData[];
 }
 
 export async function triggerPollBroadcast(
-  input: TriggerPollBroadcastInput
+  input: PollBroadcastInput
 ): Promise<{ subscriberCount: number }> {
   const campaignId = process.env.CUSTOMERIO_BROADCAST_CAMPAIGN_ID;
   
@@ -254,12 +253,13 @@ export async function triggerPollBroadcast(
     console.log('[Customer.io MOCK] Poll broadcast triggered:', {
       sharedData: input.sharedData,
       subscriberCount: input.subscribers.length,
+      sampleSubscriber: input.subscribers[0],
     });
     return { subscriberCount: input.subscribers.length };
   }
   
   const perUserData: BroadcastPerUserDataEntry[] = input.subscribers.map(sub => ({
-    id: sub.id,
+    id: sub.subscriber_id,
     data: {
       options: sub.options,
       unsubscribe_url: sub.unsubscribe_url,

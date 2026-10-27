@@ -1,6 +1,7 @@
 import { query } from './db';
 import { generateId } from './ulid';
 import { triggerRecapBroadcast } from './customerio';
+import { getRequiredBaseUrl } from './url';
 import {
   Poll,
   PollOption,
@@ -16,7 +17,6 @@ import {
 // ============================================================================
 
 const DEFAULT_MIN_VOTES = parseInt(process.env.RECAP_MIN_VOTES || '10', 10);
-const BASE_URL = process.env.NEXT_PUBLIC_BASE_URL || 'https://libertysurveys.com';
 
 // ============================================================================
 // Get Today's Active Poll Results
@@ -136,7 +136,7 @@ function calculatePercentages(
 // Build Recap Snapshot
 // ============================================================================
 
-function buildRecapSnapshot(poll: PollWithResults): RecapResultsSnapshot {
+function buildRecapSnapshot(poll: PollWithResults, baseUrl: string): RecapResultsSnapshot {
   const percentages = calculatePercentages(poll.options, poll.total_votes);
   
   let briefingExcerpt = '';
@@ -155,7 +155,7 @@ function buildRecapSnapshot(poll: PollWithResults): RecapResultsSnapshot {
     question: poll.question,
     options: percentages.sort((a, b) => a.displayOrder - b.displayOrder),
     briefingExcerpt,
-    resultsUrl: `${BASE_URL}/polls/${poll.id}`,
+    resultsUrl: `${baseUrl}/polls/${poll.id}`,
   };
 }
 
@@ -250,6 +250,18 @@ export async function sendNightlyRecap(
   
   console.log(`[RECAP] Starting nightly recap send (min votes: ${minVotes})`);
   
+  let baseUrl: string;
+  try {
+    baseUrl = getRequiredBaseUrl();
+  } catch (error) {
+    console.error('[RECAP] Base URL not configured:', error);
+    return {
+      success: false,
+      recapId: '',
+      error: error instanceof Error ? error.message : 'Base URL not configured',
+    };
+  }
+  
   const poll = await getTodaysActivePoll();
   
   if (!poll) {
@@ -274,7 +286,7 @@ export async function sendNightlyRecap(
     };
   }
   
-  const snapshot = buildRecapSnapshot(poll);
+  const snapshot = buildRecapSnapshot(poll, baseUrl);
   const recapId = await createRecapSendRecord(
     poll.id,
     today,
@@ -367,7 +379,8 @@ export async function getRecapPreview(): Promise<RecapResultsSnapshot | null> {
     return null;
   }
   
-  return buildRecapSnapshot(poll);
+  const baseUrl = getRequiredBaseUrl();
+  return buildRecapSnapshot(poll, baseUrl);
 }
 
 // ============================================================================
