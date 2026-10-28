@@ -74,6 +74,7 @@ In Amplify Console → Your App → **"Environment variables"**, add:
 | `XAI_MODEL` | `grok-4.7` | Model for poll generation |
 | `XAI_BIAS_CHECK_MODEL` | `grok-4.7` | Model for bias checking |
 | `RECAP_MIN_VOTES` | `10` | Min votes to send recap |
+| `ARCHIVE_MIN_VOTES` | `10` | Min votes to show poll in archive |
 | `DATABASE_SSL` | `true` | SSL for database connection |
 
 ---
