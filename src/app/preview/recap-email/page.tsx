@@ -84,12 +84,13 @@ export default function RecapEmailPreview() {
         </div>
 
         {/* Footer */}
-        <div className="bg-gray-100 p-6 text-center text-xs text-gray-500">
-          <p className="mb-2">Liberty Surveys · libertysurveys.com</p>
+        <div className="bg-[#1a1a1a] p-6 text-center text-xs text-white leading-relaxed">
+          <p className="mb-1">Liberty Surveys</p>
+          <p className="mb-3">160 Greentree Drive, Suite 101<br />Dover, DE 19904</p>
           <p>
-            <a href="#" className="underline">Unsubscribe</a>
+            <a href="#" className="underline text-gray-300 hover:text-white">Unsubscribe</a>
             {' · '}
-            <a href="#" className="underline">Privacy Policy</a>
+            <a href="#" className="underline text-gray-300 hover:text-white">Privacy Policy</a>
           </p>
         </div>
       </div>

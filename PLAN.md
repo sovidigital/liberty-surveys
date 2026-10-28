@@ -622,6 +622,7 @@ The owner needs to complete these steps in Customer.io to set up the "Liberty Su
 - [ ] Create "Confirmation Email" transactional message:
   - Subject: "Confirm your Liberty Surveys subscription"
   - Body: Include `{{ trigger.confirm_url }}` link
+  - Footer must include physical mailing address (CAN-SPAM): "Liberty Surveys, 160 Greentree Drive, Suite 101, Dover, DE 19904"
   - Note the message ID → set as `CUSTOMERIO_CONFIRM_MESSAGE_ID`
 
 #### 5. Create Daily Poll Broadcast
@@ -637,7 +638,9 @@ The owner needs to complete these steps in Customer.io to set up the "Liberty Su
     4. "Understanding the Issue" section with briefing background
     5. Three perspectives (conservative, liberal, centrist)
     6. Source citations
-  - Include unsubscribe link in footer
+  - Footer must include (for CAN-SPAM compliance):
+    - Physical mailing address: "Liberty Surveys, 160 Greentree Drive, Suite 101, Dover, DE 19904"
+    - Unsubscribe link
 - [ ] Note the campaign ID → set as `CUSTOMERIO_BROADCAST_CAMPAIGN_ID`
 
 #### 6. Create Nightly Recap Broadcast
@@ -650,6 +653,9 @@ The owner needs to complete these steps in Customer.io to set up the "Liberty Su
   - Display percentages (NOT vote counts) for each option
   - Include brief excerpt from briefing
   - Link to full results page
+  - Footer must include (for CAN-SPAM compliance):
+    - Physical mailing address: "Liberty Surveys, 160 Greentree Drive, Suite 101, Dover, DE 19904"
+    - Unsubscribe link
 - [ ] Note the campaign ID → set as `CUSTOMERIO_RECAP_CAMPAIGN_ID`
 
 #### 7. Email Template Variables
@@ -682,6 +688,16 @@ The owner needs to complete these steps in Customer.io to set up the "Liberty Su
 {{ trigger.sources[0].title }}       - Article title
 
 {{ customer.unsubscribe_url }}     - Unsubscribe link (auto-generated)
+```
+
+**Email Footer (CAN-SPAM Required):**
+All email templates must include the physical mailing address above the unsubscribe link:
+```html
+Liberty Surveys
+160 Greentree Drive, Suite 101
+Dover, DE 19904
+
+<a href="{{ customer.unsubscribe_url }}">Unsubscribe</a>
 ```
 
 **Nightly Recap Broadcast:**
