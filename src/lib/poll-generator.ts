@@ -1,6 +1,15 @@
 import { query } from './db';
 import { fetchNews, clusterArticlesByTopic, fetchArticlesForTopic } from './news';
-import { generatePoll, checkPollBias, validateCitations, getModelId, LlmTimeoutError } from './xai';
+import { 
+  generatePoll, 
+  checkPollBias, 
+  validateCitations, 
+  getModelId, 
+  LlmTimeoutError, 
+  getLlmTimeoutMs,
+  EmptyLlmResponseError,
+  JsonExtractionError,
+} from './xai';
 import { generateId } from './ulid';
 import {
   GenerationRun,
@@ -19,10 +28,34 @@ const MAX_RETRIES = 3;
 const MIN_ARTICLES_PER_TOPIC = 4;
 const RECENT_TOPICS_DAYS = 7;
 
-// Amplify SSR Lambda times out at ~30s. We need headroom for response serialization.
-// If we approach this limit, fail fast to evergreen fallback.
-const GENERATION_TIMEOUT_MS = 25000;
-const MAX_ARTICLES_FOR_SPEED = 50; // Fewer articles = faster pipeline
+const MAX_ARTICLES_FOR_SPEED = 50;
+
+const DEFAULT_GENERATION_TIMEOUT_MS = 240000; // 4 minutes default for standalone Lambda (5min limit)
+const MIN_TIME_FOR_LLM_RETRY_MS = 30000; // Need at least 30s remaining to attempt another LLM call
+const MIN_TIME_FOR_FALLBACK_MS = 10000; // Reserve 10s for evergreen fallback
+
+function getGenerationTimeoutMs(): number {
+  const envTimeout = process.env.GENERATION_TIMEOUT_MS;
+  if (envTimeout) {
+    const parsed = parseInt(envTimeout, 10);
+    if (!isNaN(parsed) && parsed > 0) {
+      return parsed;
+    }
+  }
+  return DEFAULT_GENERATION_TIMEOUT_MS;
+}
+
+function getTimeRemainingMs(startTime: number): number {
+  return Math.max(0, getGenerationTimeoutMs() - (Date.now() - startTime));
+}
+
+function hasTimeForLlmRetry(startTime: number): boolean {
+  return getTimeRemainingMs(startTime) >= MIN_TIME_FOR_LLM_RETRY_MS;
+}
+
+function hasTimeForFallback(startTime: number): boolean {
+  return getTimeRemainingMs(startTime) >= MIN_TIME_FOR_FALLBACK_MS;
+}
 
 // ============================================================================
 // Topic Selection
@@ -308,10 +341,13 @@ async function createPollFromGenerated(
 
 function checkTimeout(startTime: number, phase: string): void {
   const elapsed = Date.now() - startTime;
-  if (elapsed > GENERATION_TIMEOUT_MS) {
-    throw new Error(`Generation timeout in ${phase}: ${elapsed}ms elapsed (limit: ${GENERATION_TIMEOUT_MS}ms)`);
+  const limit = getGenerationTimeoutMs();
+  const remaining = limit - elapsed;
+  
+  if (remaining <= MIN_TIME_FOR_FALLBACK_MS) {
+    throw new Error(`Generation timeout in ${phase}: ${elapsed}ms elapsed (limit: ${limit}ms, need ${MIN_TIME_FOR_FALLBACK_MS}ms for fallback)`);
   }
-  console.log(`[GENERATOR] ${phase} - ${elapsed}ms elapsed`);
+  console.log(`[GENERATOR] ${phase} - ${elapsed}ms elapsed, ${remaining}ms remaining`);
 }
 
 export async function runPollGeneration(): Promise<GenerationResult> {
@@ -320,7 +356,7 @@ export async function runPollGeneration(): Promise<GenerationResult> {
   const runId = await createGenerationRun(runDate);
   
   console.log(`[GENERATOR] Starting generation run ${runId} for ${runDate.toISOString()}`);
-  console.log(`[GENERATOR] Timeout limit: ${GENERATION_TIMEOUT_MS}ms`);
+  console.log(`[GENERATOR] Timeout limit: ${getGenerationTimeoutMs()}ms`);
   
   let retryCount = 0;
   let lastError: string | undefined;
@@ -390,15 +426,15 @@ export async function runPollGeneration(): Promise<GenerationResult> {
 checkTimeout(startTime, 'before LLM generation');
     
     let llmTimedOut = false;
+    const llmTimeout = getLlmTimeoutMs();
+    
+    console.log(`[GENERATOR] Starting LLM generation with timeout=${llmTimeout}ms, pipeline limit=${getGenerationTimeoutMs()}ms`);
     
     while (retryCount < MAX_RETRIES) {
-      // Check if we have enough time for another retry
-      const elapsed = Date.now() - startTime;
-      const timeRemaining = GENERATION_TIMEOUT_MS - elapsed;
-      if (timeRemaining < 8000 && retryCount > 0) {
-        // Less than 8s left and we've already tried once - bail to fallback
-        console.log(`[GENERATOR] Only ${timeRemaining}ms remaining, bailing to fallback`);
-        lastError = `Timeout imminent after ${retryCount} retries`;
+      if (!hasTimeForLlmRetry(startTime)) {
+        const remaining = getTimeRemainingMs(startTime);
+        console.log(`[GENERATOR] Only ${remaining}ms remaining (need ${MIN_TIME_FOR_LLM_RETRY_MS}ms), bailing to fallback`);
+        lastError = `Insufficient time for retry after ${retryCount} attempts (${remaining}ms remaining)`;
         break;
       }
       
@@ -407,6 +443,8 @@ checkTimeout(startTime, 'before LLM generation');
           status: 'generating' as const,
           retry_count: retryCount,
         });
+        
+        console.log(`[GENERATOR] Attempt ${retryCount + 1}/${MAX_RETRIES}, ${getTimeRemainingMs(startTime)}ms remaining`);
         
         const { poll: generatedPoll, promptHash, rawInput, rawOutput } = await generatePoll(
           selectedCluster.topic,
@@ -471,11 +509,21 @@ checkTimeout(startTime, 'before LLM generation');
       } catch (error) {
         retryCount++;
         const isTimeout = error instanceof LlmTimeoutError;
+        const isEmptyResponse = error instanceof EmptyLlmResponseError;
+        const isJsonError = error instanceof JsonExtractionError;
+        const isRetryable = isEmptyResponse || isJsonError;
         lastError = error instanceof Error ? error.message : String(error);
         
         if (isTimeout) {
           llmTimedOut = true;
           console.error(`[GENERATOR] LLM timeout on attempt ${retryCount}:`, lastError);
+        } else if (isEmptyResponse) {
+          console.error(`[GENERATOR] Empty LLM response on attempt ${retryCount}`);
+        } else if (isJsonError) {
+          console.error(`[GENERATOR] JSON extraction failed on attempt ${retryCount}:`, lastError);
+          if (error instanceof JsonExtractionError) {
+            console.error(`[GENERATOR] Raw response preview:`, error.rawResponse);
+          }
         } else {
           console.error(`[GENERATOR] Attempt ${retryCount} failed:`, lastError);
         }
@@ -485,14 +533,23 @@ checkTimeout(startTime, 'before LLM generation');
           error_message: lastError,
         });
         
-        // On LLM timeout, immediately fall through to evergreen (don't waste time retrying)
-        if (isTimeout) {
-          console.log('[GENERATOR] LLM timed out, falling through to evergreen');
+        if (retryCount >= MAX_RETRIES) {
+          console.log(`[GENERATOR] Max retries (${MAX_RETRIES}) reached`);
           break;
         }
         
-        if (retryCount >= MAX_RETRIES) {
+        if (isTimeout) {
+          if (hasTimeForLlmRetry(startTime)) {
+            console.log(`[GENERATOR] LLM timed out but time remains (${getTimeRemainingMs(startTime)}ms), will retry`);
+            continue;
+          }
+          console.log('[GENERATOR] LLM timed out and insufficient time for retry, falling through to evergreen');
           break;
+        }
+        
+        if (isRetryable && hasTimeForLlmRetry(startTime)) {
+          console.log(`[GENERATOR] Retrying after recoverable error (${getTimeRemainingMs(startTime)}ms remaining)`);
+          continue;
         }
       }
     }

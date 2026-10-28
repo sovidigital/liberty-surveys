@@ -7,7 +7,28 @@ const USE_MOCK = process.env.USE_MOCK_LLM === 'true' || process.env.USE_MOCK_DB 
 // JSON Extraction Utilities
 // ============================================================================
 
+export class EmptyLlmResponseError extends Error {
+  constructor(context: string) {
+    super(`Empty LLM response received during ${context}`);
+    this.name = 'EmptyLlmResponseError';
+  }
+}
+
+export class JsonExtractionError extends Error {
+  public readonly rawResponse: string;
+  
+  constructor(context: string, rawResponse: string) {
+    super(`Failed to extract JSON from LLM response (${context}) - no valid JSON structure found`);
+    this.name = 'JsonExtractionError';
+    this.rawResponse = rawResponse.slice(0, 1000);
+  }
+}
+
 function extractJsonFromLlmResponse(text: string): string | null {
+  if (!text || text.trim().length === 0) {
+    return null;
+  }
+  
   // Strategy 1: Look for JSON in markdown code fences (most common LLM pattern)
   const fencePatterns = [
     /```json\s*([\s\S]*?)```/i,
@@ -343,26 +364,35 @@ export async function generatePoll(
   }
   
   console.log(`[XAI] Generating poll for topic: ${topic}`);
+  const timeoutMs = getLlmTimeoutMs();
+  console.log(`[XAI] Using timeout: ${timeoutMs}ms`);
   
   const { text, inputTokens, outputTokens } = await invokeXaiModel(
     getModelId(),
     POLL_GENERATION_SYSTEM_PROMPT,
     userPrompt,
-    { maxTokens: 4096, temperature: 0.7, reasoningEffort: 'low' }
+    { maxTokens: 4096, temperature: 0.7, reasoningEffort: 'low', timeoutMs }
   );
   
   console.log(`[XAI] Generation complete. Tokens: ${inputTokens} in, ${outputTokens} out`);
+  console.log(`[XAI] Response length: ${text.length} chars`);
+  
+  if (!text || text.trim().length === 0) {
+    console.error('[XAI] Empty response received from LLM');
+    throw new EmptyLlmResponseError('poll generation');
+  }
   
   const jsonStr = extractJsonFromLlmResponse(text);
   if (!jsonStr) {
-    console.error('[XAI] Failed to extract JSON. Raw response:', text.slice(0, 1000));
-    throw new Error('Failed to extract JSON from LLM response - no valid JSON structure found');
+    console.error('[XAI] Failed to extract JSON. Raw response preview:', text.slice(0, 1000));
+    console.error('[XAI] Response ends with:', text.slice(-200));
+    throw new JsonExtractionError('poll generation', text);
   }
   
   const poll = parseJsonWithRecovery<GeneratedPoll>(jsonStr, 'poll generation');
   
-  // Validate required fields exist
   if (!poll.question || !Array.isArray(poll.options) || poll.options.length === 0) {
+    console.error('[XAI] Invalid poll structure:', JSON.stringify(poll).slice(0, 500));
     throw new Error('Invalid poll structure: missing question or options');
   }
   

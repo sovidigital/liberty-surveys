@@ -43,8 +43,13 @@ Parameters:
 
   LlmTimeoutMs:
     Type: Number
-    Default: 15000
-    Description: Timeout for individual LLM calls in milliseconds
+    Default: 90000
+    Description: Timeout for individual LLM calls in milliseconds (default 90s for grok-4.7)
+    
+  GenerationTimeoutMs:
+    Type: Number
+    Default: 240000
+    Description: Total pipeline timeout in milliseconds (default 240s = 4min, leaving 1min buffer for 5min Lambda)
 
   SchedulerSecret:
     Type: String
@@ -147,6 +152,7 @@ Resources:
           DSQL_USER: admin
           XAI_MODEL: grok-4.7
           LLM_TIMEOUT_MS: !Ref LlmTimeoutMs
+          GENERATION_TIMEOUT_MS: !Ref GenerationTimeoutMs
           NODE_ENV: production
           # Direct API key (for non-secrets deployments)
           XAI_API_KEY: !If [UseXaiApiKeySecret, '', !Ref XaiApiKeyEnvValue]
