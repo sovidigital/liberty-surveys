@@ -13,87 +13,142 @@ interface LocalSubscriber {
 }
 
 /**
- * Upsert segment members into DSQL.
+ * Upsert segment members into DSQL using batched operations.
  * 
  * IMPORTANT: To avoid creating duplicate CIO people:
  * 1. First check if email already exists in DSQL - use existing DSQL ID
  * 2. If not, use the CIO person's identifiers.id as the DSQL subscriber ID
  * 3. Only identify back to CIO if we had to generate a new ID (rare)
+ * 
+ * PERFORMANCE: Uses batched queries instead of N sequential operations.
+ * For ~400 members, this reduces ~1200 queries to ~10 queries.
  */
 async function upsertSegmentMembers(members: CIOSegmentMember[]): Promise<LocalSubscriber[]> {
-  const results: LocalSubscriber[] = [];
+  if (members.length === 0) return [];
   
-  for (const member of members) {
-    const email = member.email.toLowerCase();
-    
-    const existing = await query<{ id: string; status: string }>(
-      'SELECT id, status FROM subscribers WHERE email = $1',
-      [email]
+  const startTime = Date.now();
+  const results: LocalSubscriber[] = [];
+  const membersNeedingIdentify: Array<{ id: string; email: string }> = [];
+  
+  const normalizedMembers = members.map(m => ({
+    ...m,
+    email: m.email.toLowerCase(),
+    proposedId: m.id && m.id.length > 0 ? m.id : generateId(),
+    needsIdentify: !m.id || m.id.length === 0,
+  }));
+  
+  const emails = normalizedMembers.map(m => m.email);
+  const existingByEmail = await query<{ id: string; email: string; status: string }>(
+    `SELECT id, email, status FROM subscribers WHERE email = ANY($1)`,
+    [emails]
+  );
+  const emailToExisting = new Map(existingByEmail.rows.map(r => [r.email, r]));
+  
+  const proposedIds = normalizedMembers
+    .filter(m => !emailToExisting.has(m.email))
+    .map(m => m.proposedId);
+  
+  let idToExisting = new Map<string, { id: string }>();
+  if (proposedIds.length > 0) {
+    const existingByIdResult = await query<{ id: string }>(
+      `SELECT id FROM subscribers WHERE id = ANY($1)`,
+      [proposedIds]
     );
+    idToExisting = new Map(existingByIdResult.rows.map(r => [r.id, r]));
+  }
+  
+  const toReactivate: string[] = [];
+  const toUpdateEmail: Array<{ id: string; email: string }> = [];
+  const toInsert: Array<{ id: string; email: string }> = [];
+  
+  for (const member of normalizedMembers) {
+    const existing = emailToExisting.get(member.email);
     
-    if (existing.rows.length > 0) {
-      const sub = existing.rows[0];
-      
-      if (sub.status !== 'active') {
-        await query(
-          `UPDATE subscribers 
-           SET status = 'active', 
-               subscribed_at = COALESCE(subscribed_at, NOW()),
-               unsubscribed_at = NULL,
-               updated_at = NOW()
-           WHERE id = $1`,
-          [sub.id]
-        );
-        console.log(`[Broadcast] Re-activated subscriber ${sub.id} from CIO segment`);
+    if (existing) {
+      if (existing.status !== 'active') {
+        toReactivate.push(existing.id);
       }
-      
-      results.push({ id: sub.id, email });
+      results.push({ id: existing.id, email: member.email });
     } else {
-      // Use CIO person's external ID (member.id) to avoid creating duplicates
-      // member.id is identifiers.id from CIO, which is what Track API uses
-      const subscriberId = member.id && member.id.length > 0 ? member.id : generateId();
-      const needsIdentify = !member.id || member.id.length === 0;
+      const idConflict = idToExisting.has(member.proposedId);
       
-      const idConflict = await query<{ id: string }>(
-        'SELECT id FROM subscribers WHERE id = $1',
-        [subscriberId]
-      );
-      
-      if (idConflict.rows.length > 0) {
-        // ID exists but email doesn't - update email
-        await query(
-          `UPDATE subscribers SET email = $1, updated_at = NOW() WHERE id = $2`,
-          [email, subscriberId]
-        );
-        console.log(`[Broadcast] Updated subscriber ${subscriberId} email to ${email}`);
-        results.push({ id: subscriberId, email });
-        continue;
+      if (idConflict) {
+        toUpdateEmail.push({ id: member.proposedId, email: member.email });
+        results.push({ id: member.proposedId, email: member.email });
+      } else {
+        toInsert.push({ id: member.proposedId, email: member.email });
+        results.push({ id: member.proposedId, email: member.email });
+        
+        if (member.needsIdentify) {
+          membersNeedingIdentify.push({ id: member.proposedId, email: member.email });
+        }
       }
+    }
+  }
+  
+  if (toReactivate.length > 0) {
+    await query(
+      `UPDATE subscribers 
+       SET status = 'active', 
+           subscribed_at = COALESCE(subscribed_at, NOW()),
+           unsubscribed_at = NULL,
+           updated_at = NOW()
+       WHERE id = ANY($1)`,
+      [toReactivate]
+    );
+    console.log(`[Broadcast] Re-activated ${toReactivate.length} subscribers`);
+  }
+  
+  if (toUpdateEmail.length > 0) {
+    for (const { id, email } of toUpdateEmail) {
+      await query(
+        `UPDATE subscribers SET email = $1, updated_at = NOW() WHERE id = $2`,
+        [email, id]
+      );
+    }
+    console.log(`[Broadcast] Updated email for ${toUpdateEmail.length} subscribers`);
+  }
+  
+  if (toInsert.length > 0) {
+    const BATCH_SIZE = 100;
+    for (let i = 0; i < toInsert.length; i += BATCH_SIZE) {
+      const batch = toInsert.slice(i, i + BATCH_SIZE);
+      const values: unknown[] = [];
+      const placeholders: string[] = [];
+      
+      batch.forEach((sub, idx) => {
+        const offset = idx * 2;
+        placeholders.push(`($${offset + 1}, $${offset + 2}, 'active', NOW(), NOW(), NOW())`);
+        values.push(sub.id, sub.email);
+      });
       
       await query(
         `INSERT INTO subscribers (id, email, status, subscribed_at, created_at, updated_at)
-         VALUES ($1, $2, 'active', NOW(), NOW(), NOW())`,
-        [subscriberId, email]
+         VALUES ${placeholders.join(', ')}
+         ON CONFLICT (id) DO NOTHING`,
+        values
       );
-      
-      console.log(`[Broadcast] Created subscriber ${subscriberId} (${email}) from CIO segment`);
-      
-      // Only identify back if we generated an ID (shouldn't happen normally)
-      if (needsIdentify) {
-        try {
-          await identifySubscriber(subscriberId, {
-            email,
-            subscription_status: 'active',
-            subscribed_at: Math.floor(Date.now() / 1000),
-          });
-        } catch (err) {
-          console.warn(`[Broadcast] Failed to identify ${subscriberId} to CIO:`, err);
-        }
+    }
+    console.log(`[Broadcast] Inserted ${toInsert.length} new subscribers`);
+  }
+  
+  if (membersNeedingIdentify.length > 0) {
+    console.log(`[Broadcast] Identifying ${membersNeedingIdentify.length} new subscribers to CIO...`);
+    for (const { id, email } of membersNeedingIdentify) {
+      try {
+        await identifySubscriber(id, {
+          email,
+          subscription_status: 'active',
+          subscribed_at: Math.floor(Date.now() / 1000),
+        });
+      } catch (err) {
+        console.warn(`[Broadcast] Failed to identify ${id} to CIO:`, err);
       }
-      
-      results.push({ id: subscriberId, email });
     }
   }
+  
+  const duration = Date.now() - startTime;
+  console.log(`[Broadcast] Upserted ${results.length} subscribers in ${duration}ms (reactivated: ${toReactivate.length}, updated: ${toUpdateEmail.length}, inserted: ${toInsert.length})`);
   
   return results;
 }
@@ -141,7 +196,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json().catch(() => ({}));
-    const { poll_id: providedPollId } = body;
+    const { poll_id: providedPollId, skip_sync: skipSync } = body;
     
     let poll_id = providedPollId;
     
@@ -196,28 +251,48 @@ export async function POST(request: NextRequest) {
 
     const segmentId = process.env.CUSTOMERIO_BROADCAST_SEGMENT_ID;
     let subscribers: LocalSubscriber[];
+    let syncSkipped = false;
     
     if (segmentId) {
       console.log(`[API] Using CIO segment ${segmentId} for broadcast audience`);
       
-      try {
-        const segmentMembers = await fetchSegmentMembers(parseInt(segmentId, 10));
+      if (skipSync) {
+        console.log(`[API] Skipping CIO segment sync (skip_sync=true), using DSQL subscribers`);
+        const dsqlSubscribers = await query<{ id: string; email: string }>(
+          "SELECT id, email FROM subscribers WHERE status = 'active'",
+          []
+        );
         
-        if (segmentMembers.length === 0) {
+        if (dsqlSubscribers.rows.length === 0) {
           return NextResponse.json(
-            { error: 'No members in the configured CIO segment' },
+            { error: 'No active subscribers in DSQL. Run /api/admin/sync-segment first.' },
             { status: 400 }
           );
         }
         
-        subscribers = await upsertSegmentMembers(segmentMembers);
-        console.log(`[API] Synced ${subscribers.length} subscribers from CIO segment`);
-      } catch (err) {
-        console.error('[API] Failed to fetch CIO segment:', err);
-        return NextResponse.json(
-          { error: 'Failed to fetch CIO segment members', details: err instanceof Error ? err.message : String(err) },
-          { status: 500 }
-        );
+        subscribers = dsqlSubscribers.rows.map(s => ({ id: s.id, email: s.email }));
+        syncSkipped = true;
+        console.log(`[API] Using ${subscribers.length} existing DSQL subscribers`);
+      } else {
+        try {
+          const segmentMembers = await fetchSegmentMembers(parseInt(segmentId, 10));
+          
+          if (segmentMembers.length === 0) {
+            return NextResponse.json(
+              { error: 'No members in the configured CIO segment' },
+              { status: 400 }
+            );
+          }
+          
+          subscribers = await upsertSegmentMembers(segmentMembers);
+          console.log(`[API] Synced ${subscribers.length} subscribers from CIO segment`);
+        } catch (err) {
+          console.error('[API] Failed to fetch CIO segment:', err);
+          return NextResponse.json(
+            { error: 'Failed to fetch CIO segment members', details: err instanceof Error ? err.message : String(err) },
+            { status: 500 }
+          );
+        }
       }
     } else {
       console.log('[API] No CUSTOMERIO_BROADCAST_SEGMENT_ID configured, using all active DSQL subscribers');
@@ -341,6 +416,7 @@ export async function POST(request: NextRequest) {
       scheduled: isScheduledJob,
       poll_id,
       subscribers_count: result.subscriberCount,
+      sync_skipped: syncSkipped,
     });
   } catch (error) {
     console.error('Broadcast error:', error);
@@ -366,6 +442,7 @@ export async function GET() {
       method: 'POST',
       body: {
         poll_id: 'string - required for admin calls, auto-selected for scheduled jobs',
+        skip_sync: 'boolean - skip CIO segment fetch, use existing DSQL subscribers (faster)',
       },
       headers: {
         'x-scheduled-job': 'true - for EventBridge scheduled jobs',
@@ -384,6 +461,8 @@ export async function GET() {
       'When CUSTOMERIO_BROADCAST_SEGMENT_ID is set, audience comes from that CIO segment',
       'Segment members are synced to DSQL before broadcast to enable signed vote URLs',
       'Without segment ID, falls back to all active DSQL subscribers',
+      'Use skip_sync=true after running /api/admin/sync-segment for faster broadcasts',
+      'Recommended: Run sync-segment at 6:45 AM, then broadcast at 7:00 AM with skip_sync=true',
     ],
   });
 }

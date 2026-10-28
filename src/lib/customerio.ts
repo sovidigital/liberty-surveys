@@ -330,6 +330,9 @@ export async function triggerRecapBroadcast(
 // 
 // NOTE: This does NOT use /environments/{env_id}/customers (Fly API) which
 // requires different authentication and would 404 on api.customer.io.
+//
+// PERFORMANCE: Attribute fetches are parallelized with a concurrency limit
+// to avoid N+1 sequential HTTP calls that would timeout on large segments.
 // ============================================================================
 
 interface CIOSegmentMembershipResponse {
@@ -349,6 +352,72 @@ interface CIOCustomerAttributesResponse {
   };
 }
 
+const FETCH_CONCURRENCY_LIMIT = 20;
+
+async function fetchCustomerAttributes(
+  customerId: string,
+  authHeader: string
+): Promise<CIOSegmentMember | null> {
+  try {
+    const response = await fetch(`${APP_API_BASE}/customers/${customerId}/attributes`, {
+      method: 'GET',
+      headers: {
+        'Authorization': authHeader,
+      },
+    });
+    
+    if (!response.ok) {
+      console.warn(`[Customer.io] Failed to fetch attributes for ${customerId}: ${response.status}`);
+      return null;
+    }
+    
+    const data: CIOCustomerAttributesResponse = await response.json();
+    const customer = data.customer;
+    
+    const email = customer.identifiers.email || 
+                 (customer.attributes.email as string) ||
+                 '';
+    
+    if (!email) {
+      console.warn(`[Customer.io] Skipping customer ${customerId} without email`);
+      return null;
+    }
+    
+    return {
+      id: customer.identifiers.id || customerId,
+      internalId: customer.identifiers.cio_id || customerId,
+      email,
+      attributes: customer.attributes,
+    };
+  } catch (err) {
+    console.warn(`[Customer.io] Error fetching customer ${customerId}:`, err);
+    return null;
+  }
+}
+
+async function fetchWithConcurrencyLimit<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T) => Promise<R>
+): Promise<R[]> {
+  const results: R[] = [];
+  const queue = [...items.entries()];
+  
+  async function worker(): Promise<void> {
+    let next: [number, T] | undefined;
+    while ((next = queue.shift()) !== undefined) {
+      const [index, item] = next;
+      const result = await fn(item);
+      results[index] = result;
+    }
+  }
+  
+  const workers = Array.from({ length: Math.min(limit, items.length) }, () => worker());
+  await Promise.all(workers);
+  
+  return results;
+}
+
 export async function fetchSegmentMembers(segmentId: number): Promise<CIOSegmentMember[]> {
   const config = getConfig();
   
@@ -360,10 +429,11 @@ export async function fetchSegmentMembers(segmentId: number): Promise<CIOSegment
     ];
   }
   
-  const members: CIOSegmentMember[] = [];
+  const allCustomerIds: string[] = [];
   let cursor: string | null = null;
   
-  console.log(`[Customer.io] Fetching segment ${segmentId} members via App API...`);
+  console.log(`[Customer.io] Fetching segment ${segmentId} membership IDs...`);
+  const membershipStart = Date.now();
   
   do {
     const url = cursor 
@@ -384,52 +454,32 @@ export async function fetchSegmentMembers(segmentId: number): Promise<CIOSegment
     }
     
     const data: CIOSegmentMembershipResponse = await response.json();
-    
-    for (const customerId of data.ids) {
-      try {
-        const attrResponse = await fetch(`${APP_API_BASE}/customers/${customerId}/attributes`, {
-          method: 'GET',
-          headers: {
-            'Authorization': getAppAuthHeader(),
-          },
-        });
-        
-        if (!attrResponse.ok) {
-          console.warn(`[Customer.io] Failed to fetch attributes for ${customerId}`);
-          continue;
-        }
-        
-        const attrData: CIOCustomerAttributesResponse = await attrResponse.json();
-        const customer = attrData.customer;
-        
-        const email = customer.identifiers.email || 
-                     (customer.attributes.email as string) ||
-                     '';
-        
-        if (!email) {
-          console.warn(`[Customer.io] Skipping customer ${customerId} without email`);
-          continue;
-        }
-        
-        members.push({
-          id: customer.identifiers.id || customerId,
-          internalId: customer.identifiers.cio_id || customerId,
-          email,
-          attributes: customer.attributes,
-        });
-      } catch (err) {
-        console.warn(`[Customer.io] Error fetching customer ${customerId}:`, err);
-      }
-    }
-    
+    allCustomerIds.push(...data.ids);
     cursor = data.next || null;
-    
-    if (members.length % 50 === 0 && members.length > 0) {
-      console.log(`[Customer.io] Fetched ${members.length} members so far...`);
-    }
   } while (cursor);
   
-  console.log(`[Customer.io] Fetched ${members.length} members from segment ${segmentId}`);
+  const membershipDuration = Date.now() - membershipStart;
+  console.log(`[Customer.io] Got ${allCustomerIds.length} member IDs in ${membershipDuration}ms`);
+  
+  if (allCustomerIds.length === 0) {
+    return [];
+  }
+  
+  console.log(`[Customer.io] Fetching attributes for ${allCustomerIds.length} members (concurrency: ${FETCH_CONCURRENCY_LIMIT})...`);
+  const attributesStart = Date.now();
+  const authHeader = getAppAuthHeader();
+  
+  const results = await fetchWithConcurrencyLimit(
+    allCustomerIds,
+    FETCH_CONCURRENCY_LIMIT,
+    (customerId) => fetchCustomerAttributes(customerId, authHeader)
+  );
+  
+  const members = results.filter((m): m is CIOSegmentMember => m !== null);
+  const attributesDuration = Date.now() - attributesStart;
+  
+  console.log(`[Customer.io] Fetched ${members.length} members with attributes in ${attributesDuration}ms (${allCustomerIds.length - members.length} skipped)`);
+  
   return members;
 }
 
