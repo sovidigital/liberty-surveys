@@ -320,34 +320,46 @@ async function searchWithXai(query: string): Promise<WebSearchResult[]> {
     return [];
   }
   
-  const timeoutMs = getLlmTimeoutMs();
+  const timeoutMs = Math.min(getLlmTimeoutMs(), 30000);
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
   
   try {
+    const requestBody = {
+      model: process.env.XAI_MODEL || 'grok-4.7',
+      temperature: 0.3,
+      max_output_tokens: 2048,
+      reasoning_effort: 'none' as const,
+      input: [
+        { 
+          role: 'system' as const, 
+          content: 'You are a research assistant. Search for recent news articles about the given political topic. Return ONLY a JSON array of articles with url, title, and snippet fields. Include articles from diverse political perspectives. Do not include any explanation, just the JSON array.' 
+        },
+        { 
+          role: 'user' as const, 
+          content: `Find recent news articles about: ${query}` 
+        },
+      ],
+      tools: [{ type: 'web_search' as const }],
+    };
+    
+    console.log(`[NEWS] xAI web search request for: "${query}" (timeout: ${timeoutMs}ms)`);
+    
     const response = await fetch('https://api.x.ai/v1/responses', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${apiKey}`,
       },
-      body: JSON.stringify({
-        model: process.env.XAI_MODEL || 'grok-4.7',
-        input: [
-          { role: 'system', content: 'You are a research assistant. Search for recent news articles about the given political topic. Return ONLY a JSON array of articles with url, title, and snippet fields. Include articles from diverse political perspectives.' },
-          { role: 'user', content: `Find recent news articles about: ${query}` },
-        ],
-        tools: [{ type: 'web_search' }],
-        max_output_tokens: 2048,
-        reasoning_effort: 'none',
-      }),
+      body: JSON.stringify(requestBody),
       signal: controller.signal,
     });
     
     clearTimeout(timeoutId);
     
     if (!response.ok) {
-      console.warn('[NEWS] xAI web search failed:', response.status);
+      const errorText = await response.text().catch(() => 'unknown');
+      console.warn(`[NEWS] xAI web search failed with HTTP ${response.status}: ${errorText.slice(0, 500)}`);
       return [];
     }
     
@@ -360,20 +372,31 @@ async function searchWithXai(query: string): Promise<WebSearchResult[]> {
       ?.map((c: { text: string }) => c.text)
       ?.join('') || '';
     
-    const jsonMatch = text.match(/\[[\s\S]*\]/);
-    if (jsonMatch) {
-      const results = JSON.parse(jsonMatch[0]) as WebSearchResult[];
-      console.log(`[NEWS] xAI search found ${results.length} articles for "${query}"`);
-      return results;
+    if (!text || text.trim().length === 0) {
+      console.warn('[NEWS] xAI web search returned empty response');
+      return [];
     }
     
+    const jsonMatch = text.match(/\[[\s\S]*?\]/);
+    if (jsonMatch) {
+      try {
+        const results = JSON.parse(jsonMatch[0]) as WebSearchResult[];
+        console.log(`[NEWS] xAI search found ${results.length} articles for "${query}"`);
+        return results;
+      } catch (parseError) {
+        console.warn('[NEWS] Failed to parse web search results:', parseError);
+        return [];
+      }
+    }
+    
+    console.warn('[NEWS] xAI web search response had no JSON array. Preview:', text.slice(0, 300));
     return [];
   } catch (error) {
     clearTimeout(timeoutId);
     if (error instanceof Error && error.name === 'AbortError') {
       console.warn(`[NEWS] xAI web search timed out after ${timeoutMs}ms`);
     } else {
-      console.warn('[NEWS] xAI web search error:', error);
+      console.warn('[NEWS] xAI web search error:', error instanceof Error ? error.message : error);
     }
     return [];
   }

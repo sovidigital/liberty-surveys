@@ -10,8 +10,14 @@
  * - DSQL_USER: Database user (default: admin)
  * - XAI_API_KEY: xAI API key for Grok
  * - XAI_MODEL: Model to use (default: grok-4.7)
- * - LLM_TIMEOUT_MS: Timeout for LLM calls in ms (default: 15000)
+ * - LLM_TIMEOUT_MS: Timeout for individual LLM calls in ms (default: 90000)
+ * - GENERATION_TIMEOUT_MS: Total pipeline timeout in ms (default: 240000)
  * - NEWS_API_KEY: (optional) NewsAPI key
+ * 
+ * Timeout guidance:
+ * - Lambda timeout is 300s (5 min)
+ * - GENERATION_TIMEOUT_MS should be ~240s to leave buffer for fallback
+ * - LLM_TIMEOUT_MS should be 60-90s per individual xAI call
  */
 
 import { Context } from 'aws-lambda';
