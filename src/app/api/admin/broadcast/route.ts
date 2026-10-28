@@ -10,6 +10,7 @@ import { Poll, PollOption, PollSource, PollWithBriefing, Subscriber } from '@/ty
 interface LocalSubscriber {
   id: string;
   email: string;
+  hasExternalId: boolean;
 }
 
 /**
@@ -34,7 +35,7 @@ async function upsertSegmentMembers(members: CIOSegmentMember[]): Promise<LocalS
     ...m,
     email: m.email.toLowerCase(),
     proposedId: m.id && m.id.length > 0 ? m.id : generateId(),
-    needsIdentify: !m.id || m.id.length === 0,
+    needsIdentify: !m.hasExternalId,
   }));
   
   const emails = normalizedMembers.map(m => m.email);
@@ -68,16 +69,16 @@ async function upsertSegmentMembers(members: CIOSegmentMember[]): Promise<LocalS
       if (existing.status !== 'active') {
         toReactivate.push(existing.id);
       }
-      results.push({ id: existing.id, email: member.email });
+      results.push({ id: existing.id, email: member.email, hasExternalId: member.hasExternalId });
     } else {
       const idConflict = idToExisting.has(member.proposedId);
       
       if (idConflict) {
         toUpdateEmail.push({ id: member.proposedId, email: member.email });
-        results.push({ id: member.proposedId, email: member.email });
+        results.push({ id: member.proposedId, email: member.email, hasExternalId: member.hasExternalId });
       } else {
         toInsert.push({ id: member.proposedId, email: member.email });
-        results.push({ id: member.proposedId, email: member.email });
+        results.push({ id: member.proposedId, email: member.email, hasExternalId: member.hasExternalId });
         
         if (member.needsIdentify) {
           membersNeedingIdentify.push({ id: member.proposedId, email: member.email });
@@ -270,7 +271,11 @@ export async function POST(request: NextRequest) {
           );
         }
         
-        subscribers = dsqlSubscribers.rows.map(s => ({ id: s.id, email: s.email }));
+        subscribers = dsqlSubscribers.rows.map(s => ({ 
+          id: s.id, 
+          email: s.email,
+          hasExternalId: true,
+        }));
         syncSkipped = true;
         console.log(`[API] Using ${subscribers.length} existing DSQL subscribers`);
       } else {
@@ -308,7 +313,11 @@ export async function POST(request: NextRequest) {
         );
       }
       
-      subscribers = subscribersResult.rows.map(s => ({ id: s.id, email: s.email }));
+      subscribers = subscribersResult.rows.map(s => ({ 
+        id: s.id, 
+        email: s.email, 
+        hasExternalId: true,
+      }));
     }
 
     let baseUrl: string;
@@ -394,6 +403,7 @@ export async function POST(request: NextRequest) {
         vote_url: generateVoteUrl(baseUrl, poll.id, opt.id, sub.id),
       })),
       unsubscribe_url: generateUnsubscribeUrl(baseUrl, sub.id, sub.email),
+      hasExternalId: sub.hasExternalId,
     }));
 
     const result = await triggerPollBroadcast({

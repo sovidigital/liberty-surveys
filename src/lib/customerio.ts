@@ -13,6 +13,7 @@ export interface CIOSegmentMember {
   internalId: string;
   email: string;
   attributes: Record<string, unknown>;
+  hasExternalId: boolean;
 }
 
 let configWarningLogged = false;
@@ -164,7 +165,8 @@ export async function sendTransactionalEmail(options: TransactionalEmailOptions)
 // ============================================================================
 
 export interface BroadcastPerUserDataEntry {
-  id: string;
+  id?: string;
+  email?: string;
   data: Record<string, unknown>;
 }
 
@@ -239,6 +241,7 @@ export interface PollBroadcastSubscriberData {
   email: string;
   options: PollBroadcastOption[];
   unsubscribe_url: string;
+  hasExternalId: boolean;
 }
 
 export interface PollBroadcastInput {
@@ -267,19 +270,33 @@ export async function triggerPollBroadcast(
     return { subscriberCount: input.subscribers.length };
   }
   
-  const perUserData: BroadcastPerUserDataEntry[] = input.subscribers.map(sub => ({
-    id: sub.subscriber_id,
-    data: {
-      options: sub.options,
-      unsubscribe_url: sub.unsubscribe_url,
-    },
-  }));
+  const perUserData: BroadcastPerUserDataEntry[] = input.subscribers.map(sub => {
+    const entry: BroadcastPerUserDataEntry = {
+      data: {
+        options: sub.options,
+        unsubscribe_url: sub.unsubscribe_url,
+      },
+    };
+    
+    if (sub.hasExternalId) {
+      entry.id = sub.subscriber_id;
+    } else {
+      entry.email = sub.email;
+    }
+    
+    return entry;
+  });
+  
+  const withId = perUserData.filter(p => p.id).length;
+  const withEmail = perUserData.filter(p => p.email).length;
+  console.log(`[Customer.io] Broadcast per_user_data: ${withId} by id, ${withEmail} by email`);
   
   await triggerBroadcast({
     campaignId: parseInt(campaignId, 10),
     data: input.sharedData as unknown as Record<string, unknown>,
     perUserData,
     idIgnoreMissing: true,
+    emailIgnoreMissing: true,
   });
   
   return { subscriberCount: input.subscribers.length };
@@ -326,96 +343,44 @@ export async function triggerRecapBroadcast(
 // 
 // Uses App API endpoint: GET /v1/segments/{segment_id}/membership
 // Docs: https://docs.customer.io/integrations/api/app/tag/segments/
-// Auth: Bearer CUSTOMERIO_APP_API_KEY (same as transactional sends)
+// Auth: Bearer CUSTOMERIO_APP_API_KEY
 // 
-// NOTE: This does NOT use /environments/{env_id}/customers (Fly API) which
-// requires different authentication and would 404 on api.customer.io.
+// The membership response includes an `identifiers` array with email, cio_id,
+// and optionally id for each member. This means NO individual attribute
+// fetches are needed - we get all required data from the membership endpoint.
 //
-// PERFORMANCE: Attribute fetches are parallelized with a concurrency limit
-// to avoid N+1 sequential HTTP calls that would timeout on large segments.
+// Response shape:
+// {
+//   "segment_id": 32,
+//   "ids": ["01M5...", "", "", ...],           // empty for email-only profiles
+//   "identifiers": [
+//     {"cio_id":"eec...","email":"...","id":"01M5..."},  // has external id
+//     {"cio_id":"eec...","email":"..."},                  // email-only profile
+//     ...
+//   ],
+//   "next": "MDo1"
+// }
+//
+// ID selection:
+// - For DSQL subscriber_id: Use identifiers[].id when present, else cio_id
+//   This keeps vote URL signatures stable.
+// - For broadcast per_user_data identification:
+//   - When hasExternalId=true: use subscriber_id (maps to CIO external id)
+//   - When hasExternalId=false: use email (CIO matches by email for email-only profiles)
+//   This ensures CIO can resolve the person whether they have an external id or not.
 // ============================================================================
 
+interface CIOSegmentMemberIdentifier {
+  id?: string;
+  email?: string;
+  cio_id?: string;
+}
+
 interface CIOSegmentMembershipResponse {
+  segment_id?: number;
   ids: string[];
-  next: string;
-}
-
-interface CIOCustomerAttributesResponse {
-  customer: {
-    id: string;
-    identifiers: {
-      id?: string;
-      email?: string;
-      cio_id?: string;
-    };
-    attributes: Record<string, unknown>;
-  };
-}
-
-const FETCH_CONCURRENCY_LIMIT = 20;
-
-async function fetchCustomerAttributes(
-  customerId: string,
-  authHeader: string
-): Promise<CIOSegmentMember | null> {
-  try {
-    const response = await fetch(`${APP_API_BASE}/customers/${customerId}/attributes`, {
-      method: 'GET',
-      headers: {
-        'Authorization': authHeader,
-      },
-    });
-    
-    if (!response.ok) {
-      console.warn(`[Customer.io] Failed to fetch attributes for ${customerId}: ${response.status}`);
-      return null;
-    }
-    
-    const data: CIOCustomerAttributesResponse = await response.json();
-    const customer = data.customer;
-    
-    const email = customer.identifiers.email || 
-                 (customer.attributes.email as string) ||
-                 '';
-    
-    if (!email) {
-      console.warn(`[Customer.io] Skipping customer ${customerId} without email`);
-      return null;
-    }
-    
-    return {
-      id: customer.identifiers.id || customerId,
-      internalId: customer.identifiers.cio_id || customerId,
-      email,
-      attributes: customer.attributes,
-    };
-  } catch (err) {
-    console.warn(`[Customer.io] Error fetching customer ${customerId}:`, err);
-    return null;
-  }
-}
-
-async function fetchWithConcurrencyLimit<T, R>(
-  items: T[],
-  limit: number,
-  fn: (item: T) => Promise<R>
-): Promise<R[]> {
-  const results: R[] = [];
-  const queue = [...items.entries()];
-  
-  async function worker(): Promise<void> {
-    let next: [number, T] | undefined;
-    while ((next = queue.shift()) !== undefined) {
-      const [index, item] = next;
-      const result = await fn(item);
-      results[index] = result;
-    }
-  }
-  
-  const workers = Array.from({ length: Math.min(limit, items.length) }, () => worker());
-  await Promise.all(workers);
-  
-  return results;
+  identifiers?: CIOSegmentMemberIdentifier[];
+  next?: string;
 }
 
 export async function fetchSegmentMembers(segmentId: number): Promise<CIOSegmentMember[]> {
@@ -424,21 +389,25 @@ export async function fetchSegmentMembers(segmentId: number): Promise<CIOSegment
   if (config.siteId === 'mock') {
     console.log(`[Customer.io MOCK] Would fetch segment ${segmentId} members`);
     return [
-      { id: 'mock-1', internalId: 'abc123', email: 'test1@example.com', attributes: {} },
-      { id: 'mock-2', internalId: 'def456', email: 'test2@example.com', attributes: {} },
+      { id: 'mock-1', internalId: 'abc123', email: 'test1@example.com', attributes: {}, hasExternalId: true },
+      { id: 'mock-2', internalId: 'def456', email: 'test2@example.com', attributes: {}, hasExternalId: true },
+      { id: 'cio_mock3', internalId: 'cio_mock3', email: 'test3@example.com', attributes: {}, hasExternalId: false },
     ];
   }
   
-  const allCustomerIds: string[] = [];
+  const members: CIOSegmentMember[] = [];
   let cursor: string | null = null;
+  let pageCount = 0;
+  let withExternalId = 0;
+  let withoutExternalId = 0;
   
-  console.log(`[Customer.io] Fetching segment ${segmentId} membership IDs...`);
-  const membershipStart = Date.now();
+  console.log(`[Customer.io] Fetching segment ${segmentId} membership...`);
+  const startTime = Date.now();
   
   do {
     const url = cursor 
-      ? `${APP_API_BASE}/segments/${segmentId}/membership?start=${cursor}`
-      : `${APP_API_BASE}/segments/${segmentId}/membership`;
+      ? `${APP_API_BASE}/segments/${segmentId}/membership?start=${encodeURIComponent(cursor)}&limit=1000`
+      : `${APP_API_BASE}/segments/${segmentId}/membership?limit=1000`;
     
     const response = await fetch(url, {
       method: 'GET',
@@ -454,31 +423,58 @@ export async function fetchSegmentMembers(segmentId: number): Promise<CIOSegment
     }
     
     const data: CIOSegmentMembershipResponse = await response.json();
-    allCustomerIds.push(...data.ids);
+    pageCount++;
+    
+    if (data.identifiers && data.identifiers.length > 0) {
+      for (const ident of data.identifiers) {
+        const email = ident.email;
+        
+        if (!email) {
+          console.warn(`[Customer.io] Skipping member without email (cio_id: ${ident.cio_id})`);
+          continue;
+        }
+        
+        const hasExtId = !!(ident.id && ident.id.trim() !== '');
+        const subscriberId = hasExtId ? ident.id! : (ident.cio_id || '');
+        
+        if (!subscriberId) {
+          console.warn(`[Customer.io] Skipping member without id or cio_id (email: ${email})`);
+          continue;
+        }
+        
+        if (hasExtId) {
+          withExternalId++;
+        } else {
+          withoutExternalId++;
+        }
+        
+        members.push({
+          id: subscriberId,
+          internalId: ident.cio_id || subscriberId,
+          email,
+          attributes: {},
+          hasExternalId: hasExtId,
+        });
+      }
+    } else if (data.ids && data.ids.length > 0) {
+      const validIds = data.ids.filter(id => id && id.trim() !== '');
+      if (validIds.length < data.ids.length) {
+        console.warn(`[Customer.io] Page ${pageCount}: identifiers array missing, ${data.ids.length - validIds.length} empty IDs in ids array (cannot sync these without identifiers)`);
+      }
+      if (validIds.length > 0) {
+        console.warn(`[Customer.io] Page ${pageCount}: identifiers array missing but ${validIds.length} valid ids found - these members lack email data`);
+      }
+    }
+    
     cursor = data.next || null;
+    
+    if (pageCount % 5 === 0 || !cursor) {
+      console.log(`[Customer.io] Page ${pageCount}: ${members.length} members collected so far...`);
+    }
   } while (cursor);
   
-  const membershipDuration = Date.now() - membershipStart;
-  console.log(`[Customer.io] Got ${allCustomerIds.length} member IDs in ${membershipDuration}ms`);
-  
-  if (allCustomerIds.length === 0) {
-    return [];
-  }
-  
-  console.log(`[Customer.io] Fetching attributes for ${allCustomerIds.length} members (concurrency: ${FETCH_CONCURRENCY_LIMIT})...`);
-  const attributesStart = Date.now();
-  const authHeader = getAppAuthHeader();
-  
-  const results = await fetchWithConcurrencyLimit(
-    allCustomerIds,
-    FETCH_CONCURRENCY_LIMIT,
-    (customerId) => fetchCustomerAttributes(customerId, authHeader)
-  );
-  
-  const members = results.filter((m): m is CIOSegmentMember => m !== null);
-  const attributesDuration = Date.now() - attributesStart;
-  
-  console.log(`[Customer.io] Fetched ${members.length} members with attributes in ${attributesDuration}ms (${allCustomerIds.length - members.length} skipped)`);
+  const duration = Date.now() - startTime;
+  console.log(`[Customer.io] Fetched ${members.length} members from segment ${segmentId} in ${duration}ms (${pageCount} pages, ${withExternalId} with external id, ${withoutExternalId} email-only)`);
   
   return members;
 }
