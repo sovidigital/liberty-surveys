@@ -149,8 +149,17 @@ export default async function PollsPage({
               See how others have voted on today&apos;s question
             </p>
 
+            <div className="bg-white rounded-xl shadow-sm p-8 border border-gray-200">
+              <PollResults
+                question={data.poll.question}
+                options={data.options}
+                totalVotes={data.totalVotes}
+                status={data.poll.status as 'active' | 'closed'}
+              />
+            </div>
+
             {(data.poll.briefing_background || data.poll.briefing_conservative) && (
-              <div className="mb-8">
+              <div className="mt-8">
                 <h2 className="text-xl font-semibold text-gray-900 mb-4">Understanding the Issue</h2>
                 <PollBriefing
                   background={data.poll.briefing_background}
@@ -161,15 +170,6 @@ export default async function PollsPage({
                 />
               </div>
             )}
-
-            <div className="bg-white rounded-xl shadow-sm p-8 border border-gray-200">
-              <PollResults
-                question={data.poll.question}
-                options={data.options}
-                totalVotes={data.totalVotes}
-                status={data.poll.status as 'active' | 'closed'}
-              />
-            </div>
 
             {/* Ad Unit - After poll results */}
             <div className="mt-8">
