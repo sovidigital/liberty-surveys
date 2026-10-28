@@ -13,6 +13,7 @@ export interface CIOSegmentMember {
   internalId: string;
   email: string;
   attributes: Record<string, unknown>;
+  hasExternalId: boolean;
 }
 
 let configWarningLogged = false;
@@ -164,7 +165,8 @@ export async function sendTransactionalEmail(options: TransactionalEmailOptions)
 // ============================================================================
 
 export interface BroadcastPerUserDataEntry {
-  id: string;
+  id?: string;
+  email?: string;
   data: Record<string, unknown>;
 }
 
@@ -239,6 +241,7 @@ export interface PollBroadcastSubscriberData {
   email: string;
   options: PollBroadcastOption[];
   unsubscribe_url: string;
+  hasExternalId: boolean;
 }
 
 export interface PollBroadcastInput {
@@ -267,19 +270,33 @@ export async function triggerPollBroadcast(
     return { subscriberCount: input.subscribers.length };
   }
   
-  const perUserData: BroadcastPerUserDataEntry[] = input.subscribers.map(sub => ({
-    id: sub.subscriber_id,
-    data: {
-      options: sub.options,
-      unsubscribe_url: sub.unsubscribe_url,
-    },
-  }));
+  const perUserData: BroadcastPerUserDataEntry[] = input.subscribers.map(sub => {
+    const entry: BroadcastPerUserDataEntry = {
+      data: {
+        options: sub.options,
+        unsubscribe_url: sub.unsubscribe_url,
+      },
+    };
+    
+    if (sub.hasExternalId) {
+      entry.id = sub.subscriber_id;
+    } else {
+      entry.email = sub.email;
+    }
+    
+    return entry;
+  });
+  
+  const withId = perUserData.filter(p => p.id).length;
+  const withEmail = perUserData.filter(p => p.email).length;
+  console.log(`[Customer.io] Broadcast per_user_data: ${withId} by id, ${withEmail} by email`);
   
   await triggerBroadcast({
     campaignId: parseInt(campaignId, 10),
     data: input.sharedData as unknown as Record<string, unknown>,
     perUserData,
     idIgnoreMissing: true,
+    emailIgnoreMissing: true,
   });
   
   return { subscriberCount: input.subscribers.length };
@@ -344,9 +361,13 @@ export async function triggerRecapBroadcast(
 //   "next": "MDo1"
 // }
 //
-// ID selection for DSQL subscriber_id and broadcast per_user_data:
-// - Use identifiers[].id when present (external ID, used by Track API)
-// - When id is missing, use cio_id (broadcast uses id_ignore_missing: true)
+// ID selection:
+// - For DSQL subscriber_id: Use identifiers[].id when present, else cio_id
+//   This keeps vote URL signatures stable.
+// - For broadcast per_user_data identification:
+//   - When hasExternalId=true: use subscriber_id (maps to CIO external id)
+//   - When hasExternalId=false: use email (CIO matches by email for email-only profiles)
+//   This ensures CIO can resolve the person whether they have an external id or not.
 // ============================================================================
 
 interface CIOSegmentMemberIdentifier {
@@ -368,15 +389,17 @@ export async function fetchSegmentMembers(segmentId: number): Promise<CIOSegment
   if (config.siteId === 'mock') {
     console.log(`[Customer.io MOCK] Would fetch segment ${segmentId} members`);
     return [
-      { id: 'mock-1', internalId: 'abc123', email: 'test1@example.com', attributes: {} },
-      { id: 'mock-2', internalId: 'def456', email: 'test2@example.com', attributes: {} },
-      { id: 'cio_mock3', internalId: 'cio_mock3', email: 'test3@example.com', attributes: {} },
+      { id: 'mock-1', internalId: 'abc123', email: 'test1@example.com', attributes: {}, hasExternalId: true },
+      { id: 'mock-2', internalId: 'def456', email: 'test2@example.com', attributes: {}, hasExternalId: true },
+      { id: 'cio_mock3', internalId: 'cio_mock3', email: 'test3@example.com', attributes: {}, hasExternalId: false },
     ];
   }
   
   const members: CIOSegmentMember[] = [];
   let cursor: string | null = null;
   let pageCount = 0;
+  let withExternalId = 0;
+  let withoutExternalId = 0;
   
   console.log(`[Customer.io] Fetching segment ${segmentId} membership...`);
   const startTime = Date.now();
@@ -411,13 +434,18 @@ export async function fetchSegmentMembers(segmentId: number): Promise<CIOSegment
           continue;
         }
         
-        const subscriberId = ident.id && ident.id.trim() !== '' 
-          ? ident.id 
-          : ident.cio_id || '';
+        const hasExtId = !!(ident.id && ident.id.trim() !== '');
+        const subscriberId = hasExtId ? ident.id! : (ident.cio_id || '');
         
         if (!subscriberId) {
           console.warn(`[Customer.io] Skipping member without id or cio_id (email: ${email})`);
           continue;
+        }
+        
+        if (hasExtId) {
+          withExternalId++;
+        } else {
+          withoutExternalId++;
         }
         
         members.push({
@@ -425,6 +453,7 @@ export async function fetchSegmentMembers(segmentId: number): Promise<CIOSegment
           internalId: ident.cio_id || subscriberId,
           email,
           attributes: {},
+          hasExternalId: hasExtId,
         });
       }
     } else if (data.ids && data.ids.length > 0) {
@@ -445,7 +474,7 @@ export async function fetchSegmentMembers(segmentId: number): Promise<CIOSegment
   } while (cursor);
   
   const duration = Date.now() - startTime;
-  console.log(`[Customer.io] Fetched ${members.length} members from segment ${segmentId} in ${duration}ms (${pageCount} pages)`);
+  console.log(`[Customer.io] Fetched ${members.length} members from segment ${segmentId} in ${duration}ms (${pageCount} pages, ${withExternalId} with external id, ${withoutExternalId} email-only)`);
   
   return members;
 }

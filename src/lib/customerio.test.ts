@@ -174,6 +174,7 @@ describe('fetchSegmentMembers identifiers-based parsing', () => {
     internalId: string;
     email: string;
     attributes: Record<string, unknown>;
+    hasExternalId: boolean;
   }
 
   function parseIdentifiers(identifiers: MembershipIdentifier[]): CIOSegmentMember[] {
@@ -183,9 +184,8 @@ describe('fetchSegmentMembers identifiers-based parsing', () => {
       const email = ident.email;
       if (!email) continue;
       
-      const subscriberId = ident.id && ident.id.trim() !== '' 
-        ? ident.id 
-        : ident.cio_id || '';
+      const hasExtId = !!(ident.id && ident.id.trim() !== '');
+      const subscriberId = hasExtId ? ident.id! : (ident.cio_id || '');
       
       if (!subscriberId) continue;
       
@@ -194,6 +194,7 @@ describe('fetchSegmentMembers identifiers-based parsing', () => {
         internalId: ident.cio_id || subscriberId,
         email,
         attributes: {},
+        hasExternalId: hasExtId,
       });
     }
     
@@ -211,6 +212,7 @@ describe('fetchSegmentMembers identifiers-based parsing', () => {
     expect(members[0].id).toBe('01M5ABC');
     expect(members[0].internalId).toBe('eec00e000001');
     expect(members[0].email).toBe('user@example.com');
+    expect(members[0].hasExternalId).toBe(true);
   });
 
   it('should use cio_id when external id is missing (email-only profile)', () => {
@@ -224,6 +226,7 @@ describe('fetchSegmentMembers identifiers-based parsing', () => {
     expect(members[0].id).toBe('eec00e000102');
     expect(members[0].internalId).toBe('eec00e000102');
     expect(members[0].email).toBe('emailonly@example.com');
+    expect(members[0].hasExternalId).toBe(false);
   });
 
   it('should skip members without email', () => {
@@ -252,10 +255,15 @@ describe('fetchSegmentMembers identifiers-based parsing', () => {
     
     expect(members.length).toBe(5);
     expect(members[0].id).toBe('01SEEDS1');
+    expect(members[0].hasExternalId).toBe(true);
     expect(members[1].id).toBe('eec002');
+    expect(members[1].hasExternalId).toBe(false);
     expect(members[2].id).toBe('01SEEDS2');
+    expect(members[2].hasExternalId).toBe(true);
     expect(members[3].id).toBe('eec004');
+    expect(members[3].hasExternalId).toBe(false);
     expect(members[4].id).toBe('eec005');
+    expect(members[4].hasExternalId).toBe(false);
   });
 
   it('should handle empty identifiers array', () => {
@@ -281,6 +289,7 @@ describe('fetchSegmentMembers identifiers-based parsing', () => {
     
     expect(members[0].id).toBe('external456');
     expect(members[0].internalId).toBe('internal123');
+    expect(members[0].hasExternalId).toBe(true);
   });
 });
 
@@ -299,5 +308,80 @@ describe('empty ID filtering (legacy fallback)', () => {
     
     expect(validIds).toEqual([]);
     expect(validIds.length).toBe(0);
+  });
+});
+
+describe('per_user_data identification', () => {
+  interface BroadcastPerUserDataEntry {
+    id?: string;
+    email?: string;
+    data: Record<string, unknown>;
+  }
+
+  interface SubscriberData {
+    subscriber_id: string;
+    email: string;
+    hasExternalId: boolean;
+  }
+
+  function buildPerUserData(subscribers: SubscriberData[]): BroadcastPerUserDataEntry[] {
+    return subscribers.map(sub => {
+      const entry: BroadcastPerUserDataEntry = {
+        data: { test_key: 'test_value' },
+      };
+      
+      if (sub.hasExternalId) {
+        entry.id = sub.subscriber_id;
+      } else {
+        entry.email = sub.email;
+      }
+      
+      return entry;
+    });
+  }
+
+  it('should use id for subscribers with external ID', () => {
+    const subscribers: SubscriberData[] = [
+      { subscriber_id: '01EXTID', email: 'external@test.com', hasExternalId: true },
+    ];
+    
+    const perUserData = buildPerUserData(subscribers);
+    
+    expect(perUserData.length).toBe(1);
+    expect(perUserData[0].id).toBe('01EXTID');
+    expect(perUserData[0].email).toBeUndefined();
+  });
+
+  it('should use email for email-only profiles', () => {
+    const subscribers: SubscriberData[] = [
+      { subscriber_id: 'cio_internal', email: 'emailonly@test.com', hasExternalId: false },
+    ];
+    
+    const perUserData = buildPerUserData(subscribers);
+    
+    expect(perUserData.length).toBe(1);
+    expect(perUserData[0].email).toBe('emailonly@test.com');
+    expect(perUserData[0].id).toBeUndefined();
+  });
+
+  it('should handle mixed subscribers correctly', () => {
+    const subscribers: SubscriberData[] = [
+      { subscriber_id: '01EXTID1', email: 'user1@test.com', hasExternalId: true },
+      { subscriber_id: 'cio_001', email: 'user2@test.com', hasExternalId: false },
+      { subscriber_id: '01EXTID2', email: 'user3@test.com', hasExternalId: true },
+      { subscriber_id: 'cio_002', email: 'user4@test.com', hasExternalId: false },
+    ];
+    
+    const perUserData = buildPerUserData(subscribers);
+    
+    expect(perUserData.length).toBe(4);
+    expect(perUserData[0].id).toBe('01EXTID1');
+    expect(perUserData[0].email).toBeUndefined();
+    expect(perUserData[1].email).toBe('user2@test.com');
+    expect(perUserData[1].id).toBeUndefined();
+    expect(perUserData[2].id).toBe('01EXTID2');
+    expect(perUserData[2].email).toBeUndefined();
+    expect(perUserData[3].email).toBe('user4@test.com');
+    expect(perUserData[3].id).toBeUndefined();
   });
 });
