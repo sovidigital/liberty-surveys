@@ -47,6 +47,32 @@ export default function DailyEmailPreview() {
             {poll.question.replace('[SAMPLE] ', '')}
           </h1>
 
+          {/* Vote Buttons */}
+          <h2 className="text-lg font-bold text-center mb-4 text-[#1a1a1a]">Cast Your Vote</h2>
+          <div className="space-y-3 mb-6">
+            {poll.options.map((option, i) => (
+              <a
+                key={i}
+                href={option.voteUrl}
+                className="block w-full py-3 px-4 text-center font-semibold rounded-lg transition-colors"
+                style={{
+                  backgroundColor: i === 0 ? '#e31c23' : '#0066b3',
+                  color: 'white',
+                }}
+              >
+                {option.text}
+              </a>
+            ))}
+          </div>
+
+          {/* Results Link */}
+          <p className="text-center mb-8 text-sm text-gray-600">
+            <a href="#" className="text-[#0066b3] underline">View current results →</a>
+          </p>
+
+          {/* Understanding the Issue */}
+          <h2 className="text-lg font-bold text-center mb-4 text-[#1a1a1a]">Understanding the Issue</h2>
+
           {/* Background */}
           <div className="bg-gray-50 p-4 rounded-lg mb-6">
             <h3 className="font-semibold text-gray-900 mb-2 text-sm">📋 Background</h3>
@@ -70,36 +96,13 @@ export default function DailyEmailPreview() {
           </div>
 
           {/* Sources */}
-          <p className="text-xs text-gray-500 mb-6 text-center">
+          <p className="text-xs text-gray-500 text-center">
             Sources: {poll.sources.map((s, i) => (
               <span key={i}>
                 {i > 0 && ' · '}
                 <a href={s.url} className="underline">{s.name}</a>
               </span>
             ))}
-          </p>
-
-          {/* Vote Buttons */}
-          <h2 className="text-lg font-bold text-center mb-4 text-[#1a1a1a]">Cast Your Vote</h2>
-          <div className="space-y-3">
-            {poll.options.map((option, i) => (
-              <a
-                key={i}
-                href={option.voteUrl}
-                className="block w-full py-3 px-4 text-center font-semibold rounded-lg transition-colors"
-                style={{
-                  backgroundColor: i === 0 ? '#e31c23' : '#0066b3',
-                  color: 'white',
-                }}
-              >
-                {option.text}
-              </a>
-            ))}
-          </div>
-
-          {/* Results Link */}
-          <p className="text-center mt-6 text-sm text-gray-600">
-            <a href="#" className="text-[#0066b3] underline">View current results →</a>
           </p>
         </div>
 

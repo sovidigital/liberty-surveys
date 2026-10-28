@@ -630,10 +630,13 @@ The owner needs to complete these steps in Customer.io to set up the "Liberty Su
 - [ ] Set audience: Segment where `subscription_status = active`
 - [ ] Design email template:
   - Subject: "Today's Poll: {{ trigger.poll_question | truncate: 50 }}"
-  - Body: Include briefing background, poll question, and vote buttons
-  - Each button links to option's `vote_url`
-  - Include the three perspectives (conservative, liberal, centrist)
-  - Include source citations
+  - Body layout (in order):
+    1. Poll question
+    2. Vote buttons (each links to option's `vote_url`)
+    3. "View current results" link
+    4. "Understanding the Issue" section with briefing background
+    5. Three perspectives (conservative, liberal, centrist)
+    6. Source citations
   - Include unsubscribe link in footer
 - [ ] Note the campaign ID → set as `CUSTOMERIO_BROADCAST_CAMPAIGN_ID`
 
