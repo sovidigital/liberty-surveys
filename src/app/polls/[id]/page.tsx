@@ -152,19 +152,6 @@ export default async function PollPage({ params, searchParams }: Props) {
           </Link>
         </div>
 
-        {(data.poll.briefing_background || data.poll.briefing_conservative) && (
-          <div className="mb-8">
-            <h2 className="text-xl font-semibold text-gray-900 mb-4">Understanding the Issue</h2>
-            <PollBriefing
-              background={data.poll.briefing_background}
-              conservative={data.poll.briefing_conservative}
-              liberal={data.poll.briefing_liberal}
-              centrist={data.poll.briefing_centrist}
-              sources={data.sources}
-            />
-          </div>
-        )}
-
         <div className="bg-white rounded-xl shadow-sm p-8 border border-gray-200">
           <p className="text-sm text-gray-500 mb-4">
             {formatDate(data.poll.published_at || data.poll.created_at)}
@@ -177,6 +164,19 @@ export default async function PollPage({ params, searchParams }: Props) {
             status={data.poll.status as 'active' | 'closed'}
           />
         </div>
+
+        {(data.poll.briefing_background || data.poll.briefing_conservative) && (
+          <div className="mt-8">
+            <h2 className="text-xl font-semibold text-gray-900 mb-4">Understanding the Issue</h2>
+            <PollBriefing
+              background={data.poll.briefing_background}
+              conservative={data.poll.briefing_conservative}
+              liberal={data.poll.briefing_liberal}
+              centrist={data.poll.briefing_centrist}
+              sources={data.sources}
+            />
+          </div>
+        )}
 
         {/* Ad Unit - After poll results */}
         <div className="mt-8">
