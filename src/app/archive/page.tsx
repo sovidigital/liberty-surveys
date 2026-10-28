@@ -9,6 +9,8 @@ import { faInbox } from '@fortawesome/free-solid-svg-icons';
 
 export const dynamic = 'force-dynamic';
 
+const ARCHIVE_MIN_VOTES = parseInt(process.env.ARCHIVE_MIN_VOTES || '10', 10);
+
 interface PollWithResults extends Poll {
   options: Array<PollOption & { vote_count: number }>;
   total_votes: number;
@@ -57,7 +59,7 @@ async function getPolls(): Promise<PollWithResults[]> {
       votesByPollOption[`${v.poll_id}:${v.option_id}`] = parseInt(v.count, 10);
     }
 
-    return pollsResult.rows.map(poll => {
+    const pollsWithVotes = pollsResult.rows.map(poll => {
       const options = (optionsByPoll[poll.id] || []).map(opt => ({
         ...opt,
         vote_count: votesByPollOption[`${poll.id}:${opt.id}`] || 0,
@@ -71,6 +73,8 @@ async function getPolls(): Promise<PollWithResults[]> {
         total_votes: totalVotes,
       };
     });
+
+    return pollsWithVotes.filter(poll => poll.total_votes >= ARCHIVE_MIN_VOTES);
   } catch (error) {
     console.error('Error fetching polls:', error);
     return [];

@@ -101,6 +101,10 @@ Visit Archive → Browse Past Polls → Click to View Results
 - Each entry shows: question, date, total votes
 - Click through to individual results page
 
+**Visibility:**
+- Only polls with sufficient engagement appear in the archive (default: 10 votes, configurable via `ARCHIVE_MIN_VOTES`)
+- Low-vote polls are hidden from the public archive to maintain quality, but individual poll result URLs still work via direct link
+
 ### 6. Unsubscribe Flow
 
 ```
@@ -315,6 +319,9 @@ USE_MOCK_NEWS=false
 # Nightly Recap
 RECAP_MIN_VOTES=10
 CUSTOMERIO_RECAP_CAMPAIGN_ID=your_campaign_id
+
+# Archive
+ARCHIVE_MIN_VOTES=10
 
 # Scheduler Security
 SCHEDULER_SECRET=your_secret
