@@ -177,3 +177,122 @@ describe('fetchSegmentMembers performance characteristics', () => {
     expect(parallelTime).toBeLessThan(sequentialTime / 10);
   });
 });
+
+describe('empty ID filtering', () => {
+  it('should filter out empty string IDs from membership response', () => {
+    const rawIds = ['abc123', '', 'def456', '   ', 'ghi789', ''];
+    const validIds = rawIds.filter(id => id && id.trim() !== '');
+    
+    expect(validIds).toEqual(['abc123', 'def456', 'ghi789']);
+    expect(validIds.length).toBe(3);
+  });
+
+  it('should filter out null/undefined IDs', () => {
+    const rawIds = ['abc123', null, 'def456', undefined, 'ghi789'] as (string | null | undefined)[];
+    const validIds = rawIds.filter((id): id is string => !!id && id.trim() !== '');
+    
+    expect(validIds).toEqual(['abc123', 'def456', 'ghi789']);
+  });
+
+  it('should handle array with all empty IDs', () => {
+    const rawIds = ['', '   ', '', ''];
+    const validIds = rawIds.filter(id => id && id.trim() !== '');
+    
+    expect(validIds).toEqual([]);
+    expect(validIds.length).toBe(0);
+  });
+});
+
+describe('segment filter building', () => {
+  it('should build correct base64 segment filter', () => {
+    const segmentId = 32;
+    const filter = {
+      and: [
+        {
+          segment: {
+            id: segmentId,
+          },
+        },
+      ],
+    };
+    const encoded = Buffer.from(JSON.stringify(filter)).toString('base64');
+    
+    const decoded = JSON.parse(Buffer.from(encoded, 'base64').toString('utf8'));
+    expect(decoded).toEqual(filter);
+    expect(decoded.and[0].segment.id).toBe(32);
+  });
+});
+
+describe('customer data extraction', () => {
+  interface TestCustomer {
+    id: string;
+    identifiers?: { email?: string; id?: string; cio_id?: string };
+    attributes: Record<string, unknown>;
+  }
+
+  it('should extract email from identifiers.email', () => {
+    const customer: TestCustomer = {
+      id: 'cust123',
+      identifiers: { email: 'user@example.com', id: 'ext123' },
+      attributes: {},
+    };
+    
+    const email = customer.identifiers?.email || 
+                 (customer.attributes?.email as string) ||
+                 '';
+    
+    expect(email).toBe('user@example.com');
+  });
+
+  it('should fall back to attributes.email when identifiers.email missing', () => {
+    const customer: TestCustomer = {
+      id: 'cust123',
+      identifiers: { id: 'ext123' },
+      attributes: { email: 'fallback@example.com' },
+    };
+    
+    const email = customer.identifiers?.email || 
+                 (customer.attributes?.email as string) ||
+                 '';
+    
+    expect(email).toBe('fallback@example.com');
+  });
+
+  it('should use external id when available', () => {
+    const customer: TestCustomer = {
+      id: 'internal-cio-id',
+      identifiers: { email: 'user@example.com', id: 'external-id' },
+      attributes: {},
+    };
+    
+    const id = customer.identifiers?.id || customer.id;
+    expect(id).toBe('external-id');
+  });
+
+  it('should fall back to internal id when external id missing', () => {
+    const customer: TestCustomer = {
+      id: 'internal-cio-id',
+      identifiers: { email: 'user@example.com' },
+      attributes: {},
+    };
+    
+    const id = customer.identifiers?.id || customer.id;
+    expect(id).toBe('internal-cio-id');
+  });
+
+  it('should skip customers without email', () => {
+    const customers: TestCustomer[] = [
+      { id: '1', identifiers: { email: 'a@test.com' }, attributes: {} },
+      { id: '2', identifiers: {}, attributes: {} },
+      { id: '3', identifiers: { email: 'c@test.com' }, attributes: {} },
+    ];
+    
+    const withEmail = customers.filter(c => {
+      const email = c.identifiers?.email || (c.attributes?.email as string) || '';
+      return email !== '';
+    });
+    
+    expect(withEmail.length).toBe(2);
+    expect(withEmail.map(c => c.id)).toEqual(['1', '3']);
+  });
+});

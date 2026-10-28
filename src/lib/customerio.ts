@@ -324,16 +324,21 @@ export async function triggerRecapBroadcast(
 // Segment Member Fetching
 // ============================================================================
 // 
-// Uses App API endpoint: GET /v1/segments/{segment_id}/membership
-// Docs: https://docs.customer.io/integrations/api/app/tag/segments/
-// Auth: Bearer CUSTOMERIO_APP_API_KEY (same as transactional sends)
+// PRIMARY: Uses Fly API endpoint: GET /v1/environments/{env}/customers
+// with segment filter - returns full customer data including email in one call.
 // 
-// NOTE: This does NOT use /environments/{env_id}/customers (Fly API) which
-// requires different authentication and would 404 on api.customer.io.
+// FALLBACK: Uses App API endpoint: GET /v1/segments/{segment_id}/membership
+// then fetches attributes for each member (parallelized with concurrency limit).
+// 
+// The Fly API approach is preferred because it:
+// - Returns email directly (no N+1 attribute fetches needed)
+// - Returns all customer data in paginated responses
+// - Avoids empty-ID issues with email-only profiles
 //
-// PERFORMANCE: Attribute fetches are parallelized with a concurrency limit
-// to avoid N+1 sequential HTTP calls that would timeout on large segments.
+// Fly API requires CUSTOMERIO_ENVIRONMENT_ID to be set.
 // ============================================================================
+
+const FLY_API_BASE = 'https://fly.customer.io/api/v1';
 
 interface CIOSegmentMembershipResponse {
   ids: string[];
@@ -352,14 +357,129 @@ interface CIOCustomerAttributesResponse {
   };
 }
 
+interface FlyAPICustomer {
+  id: string;
+  internal_id: string;
+  identifiers: {
+    id?: string;
+    email?: string;
+    cio_id?: string;
+  };
+  attributes: Record<string, unknown>;
+  unsubscribed: boolean;
+}
+
+interface FlyAPICustomersResponse {
+  customers: FlyAPICustomer[];
+  meta: {
+    pagination: {
+      page: number;
+      size: number;
+      total: number;
+    };
+  };
+}
+
 const FETCH_CONCURRENCY_LIMIT = 20;
+const FLY_API_PAGE_SIZE = 100;
+
+function getFlyAuthHeader(): string {
+  const { appApiKey } = getConfig();
+  if (!appApiKey) {
+    throw new Error('CUSTOMERIO_APP_API_KEY must be set');
+  }
+  return `Bearer ${appApiKey}`;
+}
+
+function buildSegmentFilter(segmentId: number): string {
+  const filter = {
+    and: [
+      {
+        segment: {
+          id: segmentId,
+        },
+      },
+    ],
+  };
+  return Buffer.from(JSON.stringify(filter)).toString('base64');
+}
+
+async function fetchSegmentMembersViaFlyAPI(
+  environmentId: string,
+  segmentId: number
+): Promise<CIOSegmentMember[]> {
+  const members: CIOSegmentMember[] = [];
+  const filters = buildSegmentFilter(segmentId);
+  let page = 1;
+  let totalFetched = 0;
+  let totalExpected = 0;
+  
+  console.log(`[Customer.io] Fetching segment ${segmentId} members via Fly API (env: ${environmentId})...`);
+  const startTime = Date.now();
+  
+  do {
+    const url = `${FLY_API_BASE}/environments/${environmentId}/customers?filters=${encodeURIComponent(filters)}&page=${page}&size=${FLY_API_PAGE_SIZE}`;
+    
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Authorization': getFlyAuthHeader(),
+      },
+    });
+    
+    if (!response.ok) {
+      const error = await response.text();
+      console.error(`[Customer.io] Fly API customers fetch error: ${response.status}`, error);
+      throw new Error(`Failed to fetch customers from Fly API: ${response.status} ${error}`);
+    }
+    
+    const data: FlyAPICustomersResponse = await response.json();
+    totalExpected = data.meta.pagination.total;
+    
+    for (const customer of data.customers) {
+      const email = customer.identifiers?.email || 
+                   (customer.attributes?.email as string) ||
+                   '';
+      
+      if (!email) {
+        console.warn(`[Customer.io] Skipping customer ${customer.id} without email`);
+        continue;
+      }
+      
+      members.push({
+        id: customer.identifiers?.id || customer.id,
+        internalId: customer.identifiers?.cio_id || customer.internal_id || customer.id,
+        email,
+        attributes: customer.attributes || {},
+      });
+    }
+    
+    totalFetched += data.customers.length;
+    
+    if (page % 5 === 0) {
+      console.log(`[Customer.io] Fetched ${totalFetched}/${totalExpected} customers...`);
+    }
+    
+    page++;
+  } while (totalFetched < totalExpected);
+  
+  const duration = Date.now() - startTime;
+  console.log(`[Customer.io] Fetched ${members.length} members via Fly API in ${duration}ms (${totalExpected - members.length} skipped)`);
+  
+  return members;
+}
 
 async function fetchCustomerAttributes(
   customerId: string,
   authHeader: string
 ): Promise<CIOSegmentMember | null> {
+  if (!customerId || customerId.trim() === '') {
+    console.warn(`[Customer.io] Skipping empty customer ID`);
+    return null;
+  }
+  
   try {
-    const response = await fetch(`${APP_API_BASE}/customers/${customerId}/attributes`, {
+    const response = await fetch(`${APP_API_BASE}/customers/${encodeURIComponent(customerId)}/attributes`, {
       method: 'GET',
       headers: {
         'Authorization': authHeader,
@@ -367,30 +487,30 @@ async function fetchCustomerAttributes(
     });
     
     if (!response.ok) {
-      console.warn(`[Customer.io] Failed to fetch attributes for ${customerId}: ${response.status}`);
+      console.warn(`[Customer.io] Failed to fetch attributes for "${customerId}": ${response.status}`);
       return null;
     }
     
     const data: CIOCustomerAttributesResponse = await response.json();
     const customer = data.customer;
     
-    const email = customer.identifiers.email || 
-                 (customer.attributes.email as string) ||
+    const email = customer.identifiers?.email || 
+                 (customer.attributes?.email as string) ||
                  '';
     
     if (!email) {
-      console.warn(`[Customer.io] Skipping customer ${customerId} without email`);
+      console.warn(`[Customer.io] Skipping customer "${customerId}" without email`);
       return null;
     }
     
     return {
-      id: customer.identifiers.id || customerId,
-      internalId: customer.identifiers.cio_id || customerId,
+      id: customer.identifiers?.id || customerId,
+      internalId: customer.identifiers?.cio_id || customerId,
       email,
-      attributes: customer.attributes,
+      attributes: customer.attributes || {},
     };
   } catch (err) {
-    console.warn(`[Customer.io] Error fetching customer ${customerId}:`, err);
+    console.warn(`[Customer.io] Error fetching customer "${customerId}":`, err);
     return null;
   }
 }
@@ -418,27 +538,17 @@ async function fetchWithConcurrencyLimit<T, R>(
   return results;
 }
 
-export async function fetchSegmentMembers(segmentId: number): Promise<CIOSegmentMember[]> {
-  const config = getConfig();
-  
-  if (config.siteId === 'mock') {
-    console.log(`[Customer.io MOCK] Would fetch segment ${segmentId} members`);
-    return [
-      { id: 'mock-1', internalId: 'abc123', email: 'test1@example.com', attributes: {} },
-      { id: 'mock-2', internalId: 'def456', email: 'test2@example.com', attributes: {} },
-    ];
-  }
-  
+async function fetchSegmentMembersViaAppAPI(segmentId: number): Promise<CIOSegmentMember[]> {
   const allCustomerIds: string[] = [];
   let cursor: string | null = null;
   
-  console.log(`[Customer.io] Fetching segment ${segmentId} membership IDs...`);
+  console.log(`[Customer.io] Fetching segment ${segmentId} membership IDs via App API...`);
   const membershipStart = Date.now();
   
   do {
     const url = cursor 
-      ? `${APP_API_BASE}/segments/${segmentId}/membership?start=${cursor}`
-      : `${APP_API_BASE}/segments/${segmentId}/membership`;
+      ? `${APP_API_BASE}/segments/${segmentId}/membership?start=${encodeURIComponent(cursor)}&limit=1000`
+      : `${APP_API_BASE}/segments/${segmentId}/membership?limit=1000`;
     
     const response = await fetch(url, {
       method: 'GET',
@@ -454,12 +564,20 @@ export async function fetchSegmentMembers(segmentId: number): Promise<CIOSegment
     }
     
     const data: CIOSegmentMembershipResponse = await response.json();
-    allCustomerIds.push(...data.ids);
+    
+    const validIds = (data.ids || []).filter(id => id && id.trim() !== '');
+    const skippedEmpty = (data.ids || []).length - validIds.length;
+    
+    if (skippedEmpty > 0) {
+      console.warn(`[Customer.io] Skipped ${skippedEmpty} empty IDs in membership response`);
+    }
+    
+    allCustomerIds.push(...validIds);
     cursor = data.next || null;
   } while (cursor);
   
   const membershipDuration = Date.now() - membershipStart;
-  console.log(`[Customer.io] Got ${allCustomerIds.length} member IDs in ${membershipDuration}ms`);
+  console.log(`[Customer.io] Got ${allCustomerIds.length} valid member IDs in ${membershipDuration}ms`);
   
   if (allCustomerIds.length === 0) {
     return [];
@@ -481,6 +599,30 @@ export async function fetchSegmentMembers(segmentId: number): Promise<CIOSegment
   console.log(`[Customer.io] Fetched ${members.length} members with attributes in ${attributesDuration}ms (${allCustomerIds.length - members.length} skipped)`);
   
   return members;
+}
+
+export async function fetchSegmentMembers(segmentId: number): Promise<CIOSegmentMember[]> {
+  const config = getConfig();
+  
+  if (config.siteId === 'mock') {
+    console.log(`[Customer.io MOCK] Would fetch segment ${segmentId} members`);
+    return [
+      { id: 'mock-1', internalId: 'abc123', email: 'test1@example.com', attributes: {} },
+      { id: 'mock-2', internalId: 'def456', email: 'test2@example.com', attributes: {} },
+    ];
+  }
+  
+  if (config.environmentId && config.environmentId !== 'mock') {
+    try {
+      return await fetchSegmentMembersViaFlyAPI(config.environmentId, segmentId);
+    } catch (err) {
+      console.warn(`[Customer.io] Fly API failed, falling back to App API:`, err);
+    }
+  } else {
+    console.log(`[Customer.io] CUSTOMERIO_ENVIRONMENT_ID not set, using App API (slower N+1 pattern)`);
+  }
+  
+  return await fetchSegmentMembersViaAppAPI(segmentId);
 }
 
 export const customerio = {
