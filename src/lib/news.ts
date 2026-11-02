@@ -244,6 +244,43 @@ async function fetchFromRSS(source: NewsSource): Promise<NewsArticle[]> {
   }
 }
 
+function parseRSSDate(dateStr: string | null): Date {
+  if (!dateStr) {
+    return new Date();
+  }
+  
+  const trimmed = dateStr.trim();
+  
+  // Try standard Date parsing first
+  let parsed = new Date(trimmed);
+  if (!isNaN(parsed.getTime())) {
+    return parsed;
+  }
+  
+  // Handle common RSS date formats that may fail standard parsing
+  // RFC 822 format: "Mon, 02 Nov 2026 12:00:00 GMT"
+  // ISO 8601: "2026-11-02T12:00:00Z"
+  // Some feeds use: "2026-11-02 12:00:00"
+  
+  // Try removing timezone abbreviations that JS doesn't understand
+  const withoutTzAbbrev = trimmed.replace(/\s+(EST|EDT|CST|CDT|MST|MDT|PST|PDT)$/i, '');
+  parsed = new Date(withoutTzAbbrev);
+  if (!isNaN(parsed.getTime())) {
+    return parsed;
+  }
+  
+  // Try parsing "2026-11-02 12:00:00" format (space instead of T)
+  const isoLike = trimmed.replace(' ', 'T');
+  parsed = new Date(isoLike);
+  if (!isNaN(parsed.getTime())) {
+    return parsed;
+  }
+  
+  // Fall back to current time if all parsing fails
+  console.warn(`[NEWS] Failed to parse date: "${trimmed}"`);
+  return new Date();
+}
+
 function parseRSSFeed(xml: string, source: NewsSource): NewsArticle[] {
   const articles: NewsArticle[] = [];
   
@@ -256,7 +293,7 @@ function parseRSSFeed(xml: string, source: NewsSource): NewsArticle[] {
     const title = extractXMLTag(item, 'title');
     const description = extractXMLTag(item, 'description') || extractXMLTag(item, 'summary');
     const link = extractXMLTag(item, 'link') || extractXMLTag(item, 'guid');
-    const pubDate = extractXMLTag(item, 'pubDate') || extractXMLTag(item, 'published');
+    const pubDate = extractXMLTag(item, 'pubDate') || extractXMLTag(item, 'published') || extractXMLTag(item, 'dc:date');
     const content = extractXMLTag(item, 'content:encoded') || extractXMLTag(item, 'content');
     
     if (title && link) {
@@ -269,7 +306,7 @@ function parseRSSFeed(xml: string, source: NewsSource): NewsArticle[] {
           name: source.name,
           politicalLean: source.politicalLean,
         },
-        publishedAt: pubDate ? new Date(pubDate) : new Date(),
+        publishedAt: parseRSSDate(pubDate),
       });
     }
   }
@@ -683,12 +720,50 @@ export async function fetchNews(options: FetchNewsOptions = {}): Promise<NewsArt
     allArticles.push(...webArticles);
   }
   
-  const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
-  const recentArticles = allArticles.filter(a => a.publishedAt > oneDayAgo);
+  // Filter out articles with invalid dates (NaN timestamps)
+  const validArticles = allArticles.filter(a => {
+    const timestamp = a.publishedAt.getTime();
+    return !isNaN(timestamp) && timestamp > 0;
+  });
+  
+  if (validArticles.length < allArticles.length) {
+    console.warn(`[NEWS] Filtered out ${allArticles.length - validArticles.length} articles with invalid dates`);
+  }
+  
+  // Progressive time window: try 24h first, fall back to 48h, then 72h
+  // This handles weekends, holidays, and slow news days
+  const timeWindows = [
+    { hours: 24, label: '24 hours' },
+    { hours: 48, label: '48 hours' },
+    { hours: 72, label: '72 hours' },
+  ];
+  
+  const MIN_ARTICLES_FOR_GENERATION = 10;
+  let recentArticles: NewsArticle[] = [];
+  let usedWindow = timeWindows[0];
+  
+  for (const window of timeWindows) {
+    const cutoff = new Date(Date.now() - window.hours * 60 * 60 * 1000);
+    recentArticles = validArticles.filter(a => a.publishedAt > cutoff);
+    usedWindow = window;
+    
+    if (recentArticles.length >= MIN_ARTICLES_FOR_GENERATION) {
+      console.log(`[NEWS] Found ${recentArticles.length} articles within ${window.label}`);
+      break;
+    }
+    
+    console.log(`[NEWS] Only ${recentArticles.length} articles within ${window.label}, trying wider window...`);
+  }
+  
+  // If still not enough articles after all windows, use all valid articles
+  if (recentArticles.length < MIN_ARTICLES_FOR_GENERATION && validArticles.length > recentArticles.length) {
+    console.warn(`[NEWS] Using all ${validArticles.length} valid articles (none met minimum threshold within 72h)`);
+    recentArticles = validArticles;
+  }
   
   recentArticles.sort((a, b) => b.publishedAt.getTime() - a.publishedAt.getTime());
   
-  console.log(`[NEWS] Total: ${recentArticles.length} recent articles`);
+  console.log(`[NEWS] Total: ${recentArticles.length} articles (window: ${usedWindow.label})`);
   
   return recentArticles.slice(0, maxArticles);
 }
