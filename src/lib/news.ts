@@ -366,7 +366,7 @@ async function searchWithXai(query: string): Promise<WebSearchResult[]> {
       model: process.env.XAI_MODEL || 'grok-4.7',
       temperature: 0.3,
       max_output_tokens: 2048,
-      reasoning_effort: 'none' as const,
+      reasoning_effort: 'low' as const,
       input: [
         { 
           role: 'system' as const, 
