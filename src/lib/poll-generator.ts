@@ -118,29 +118,85 @@ async function selectBestTopic(
 // Fallback Handling
 // ============================================================================
 
+const EVERGREEN_EXCLUSION_DAYS = 14;
+
 async function getEvergreenFallback(): Promise<EvergreenPoll | null> {
   try {
-    const result = await query<EvergreenPoll>(
-      `SELECT * FROM evergreen_polls 
-       WHERE is_active = TRUE 
-       ORDER BY last_used_at ASC NULLS FIRST, use_count ASC 
-       LIMIT 1`
+    // First, get recent poll questions to exclude from evergreen selection
+    // This prevents the same question from appearing within the exclusion window
+    const recentPollsResult = await query<{ question: string }>(
+      `SELECT question FROM polls 
+       WHERE created_at > NOW() - INTERVAL '${EVERGREEN_EXCLUSION_DAYS} days'
+       ORDER BY created_at DESC`
     );
     
-    if (result.rows.length === 0) {
+    const recentQuestions = recentPollsResult.rows.map(r => r.question.toLowerCase().trim());
+    console.log(`[GENERATOR] Found ${recentQuestions.length} recent poll questions to exclude from evergreen selection`);
+    
+    // Fetch all active evergreen polls, ordered by least recently used
+    const evergreenResult = await query<EvergreenPoll>(
+      `SELECT * FROM evergreen_polls 
+       WHERE is_active = TRUE 
+       ORDER BY last_used_at ASC NULLS FIRST, use_count ASC`
+    );
+    
+    if (evergreenResult.rows.length === 0) {
+      console.warn('[GENERATOR] No active evergreen polls available');
       return null;
     }
     
-    const poll = result.rows[0];
+    console.log(`[GENERATOR] Evaluating ${evergreenResult.rows.length} evergreen polls`);
     
+    // Find the first evergreen poll whose question wasn't used recently
+    let selectedPoll: EvergreenPoll | null = null;
+    
+    for (const poll of evergreenResult.rows) {
+      const pollQuestionLower = poll.question.toLowerCase().trim();
+      
+      // Check if this exact question (or very similar) was used recently
+      const wasUsedRecently = recentQuestions.some(recentQ => {
+        // Exact match
+        if (recentQ === pollQuestionLower) return true;
+        
+        // Check for high similarity (one contains the other, ignoring minor differences)
+        // This catches cases like "Should X?" vs "Should X" (with/without question mark)
+        const normalizedRecent = recentQ.replace(/[?!.,]/g, '').trim();
+        const normalizedPoll = pollQuestionLower.replace(/[?!.,]/g, '').trim();
+        
+        if (normalizedRecent === normalizedPoll) return true;
+        
+        // Check if the core question is the same (first 50 chars match)
+        if (normalizedRecent.slice(0, 50) === normalizedPoll.slice(0, 50)) return true;
+        
+        return false;
+      });
+      
+      if (wasUsedRecently) {
+        console.log(`[GENERATOR] Skipping evergreen "${poll.question.slice(0, 50)}..." - used recently`);
+        continue;
+      }
+      
+      selectedPoll = poll;
+      console.log(`[GENERATOR] Selected evergreen: "${poll.question.slice(0, 50)}..."`);
+      break;
+    }
+    
+    // If all evergreen polls were used recently, fall back to the least recently used one
+    // This is a last resort when the pool is exhausted
+    if (!selectedPoll) {
+      console.warn('[GENERATOR] All evergreen polls were used recently, using least recently used as fallback');
+      selectedPoll = evergreenResult.rows[0];
+    }
+    
+    // Update the selected poll's usage tracking
     await query(
       `UPDATE evergreen_polls 
        SET last_used_at = NOW(), use_count = use_count + 1 
        WHERE id = $1`,
-      [poll.id]
+      [selectedPoll.id]
     );
     
-    return poll;
+    return selectedPoll;
   } catch (error) {
     console.error('[GENERATOR] Error fetching evergreen fallback:', error);
     return null;
@@ -365,13 +421,24 @@ export async function runPollGeneration(): Promise<GenerationResult> {
     await updateGenerationRun(runId, { status: 'fetching_news' as const });
     
     // Fetch fewer articles for speed - we only need enough for topic clustering and LLM context
+    console.log('[GENERATOR] Fetching news articles...');
     const articles = await fetchNews({ maxArticles: MAX_ARTICLES_FOR_SPEED });
     
     checkTimeout(startTime, 'after news fetch');
     
     if (articles.length === 0) {
-      throw new Error('No news articles fetched');
+      console.error('[GENERATOR] News fetch returned 0 articles - this will trigger evergreen fallback');
+      throw new Error('No news articles fetched - RSS feeds may be down or returning old content');
     }
+    
+    console.log(`[GENERATOR] Successfully fetched ${articles.length} news articles`);
+    
+    // Log source distribution for diagnostics
+    const sourceCounts = articles.reduce((acc, a) => {
+      acc[a.source.politicalLean] = (acc[a.source.politicalLean] || 0) + 1;
+      return acc;
+    }, {} as Record<string, number>);
+    console.log('[GENERATOR] Article distribution by political lean:', JSON.stringify(sourceCounts));
     
     await updateGenerationRun(runId, {
       articles_fetched_count: articles.length,
@@ -401,7 +468,17 @@ export async function runPollGeneration(): Promise<GenerationResult> {
     const topicSelection = await selectBestTopic(clusters, recentTopics);
     
     if (!topicSelection) {
-      throw new Error('No suitable topic found');
+      console.error('[GENERATOR] No suitable topic found from clusters');
+      console.error(`[GENERATOR] Cluster count: ${clusters.length}`);
+      console.error(`[GENERATOR] Recent topics to avoid: ${recentTopics.length}`);
+      if (clusters.length > 0) {
+        console.error('[GENERATOR] Top clusters evaluated:', clusters.slice(0, 5).map(c => ({
+          topic: c.topic,
+          articles: c.articles.length,
+          breadth: c.coverageBreadth,
+        })));
+      }
+      throw new Error(`No suitable topic found - ${clusters.length} clusters evaluated, ${recentTopics.length} recent topics excluded`);
     }
     
     const { topic: selectedCluster, reason: topicReason } = topicSelection;
@@ -558,6 +635,7 @@ checkTimeout(startTime, 'before LLM generation');
       ? 'LLM call timed out' 
       : `Generation failed after ${retryCount} attempts`;
     console.log(`[GENERATOR] ${fallbackReasonPrefix}, using evergreen fallback`);
+    console.log(`[GENERATOR] Last error: ${lastError}`);
     
     const evergreen = await getEvergreenFallback();
     
