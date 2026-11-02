@@ -164,7 +164,7 @@ interface ResponsesRequest {
   input: ResponsesMessage[];
   temperature?: number;
   max_output_tokens?: number;
-  reasoning_effort?: 'none' | 'low' | 'medium' | 'high';
+  reasoning_effort?: 'low' | 'medium' | 'high';
   tools?: Array<{
     type: 'web_search' | 'x_search';
     filters?: {
@@ -196,7 +196,7 @@ async function invokeXaiModel(
   options: {
     maxTokens?: number;
     temperature?: number;
-    reasoningEffort?: 'none' | 'low' | 'medium' | 'high';
+    reasoningEffort?: 'low' | 'medium' | 'high';
     useWebSearch?: boolean;
     webSearchDomains?: string[];
     timeoutMs?: number;
@@ -464,7 +464,7 @@ Return ONLY the JSON analysis.`;
     getBiasCheckModelId(),
     BIAS_CHECK_SYSTEM_PROMPT,
     userPrompt,
-    { maxTokens: 1024, temperature: 0.3, reasoningEffort: 'none' }
+    { maxTokens: 1024, temperature: 0.3, reasoningEffort: 'low' }
   );
   
   const jsonStr = extractJsonFromLlmResponse(text);
