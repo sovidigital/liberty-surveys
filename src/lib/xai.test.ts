@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { 
-  getLlmTimeoutMs, 
   EmptyLlmResponseError, 
   JsonExtractionError,
   LlmTimeoutError,
+  extractTextFromResponsesOutput,
 } from './xai';
 
 describe('getLlmTimeoutMs', () => {
@@ -114,5 +114,119 @@ describe('JSON extraction (via error handling)', () => {
       const hasJson = testCase.input.includes('{') && testCase.input.includes('}');
       expect(hasJson).toBe(testCase.hasJson);
     }
+  });
+});
+
+describe('extractTextFromResponsesOutput', () => {
+  it('extracts text from output_text content parts (xAI Responses API format)', () => {
+    const output = [
+      {
+        type: 'message' as const,
+        content: [
+          { type: 'output_text' as const, text: '{"question": "Should we..."}' },
+        ],
+      },
+    ];
+    expect(extractTextFromResponsesOutput(output)).toBe('{"question": "Should we..."}');
+  });
+
+  it('extracts text from legacy text content parts', () => {
+    const output = [
+      {
+        type: 'message' as const,
+        content: [
+          { type: 'text' as const, text: '{"question": "Legacy format"}' },
+        ],
+      },
+    ];
+    expect(extractTextFromResponsesOutput(output)).toBe('{"question": "Legacy format"}');
+  });
+
+  it('handles mixed output_text and text content parts', () => {
+    const output = [
+      {
+        type: 'message' as const,
+        content: [
+          { type: 'output_text' as const, text: 'Part 1' },
+          { type: 'text' as const, text: 'Part 2' },
+        ],
+      },
+    ];
+    expect(extractTextFromResponsesOutput(output)).toBe('Part 1Part 2');
+  });
+
+  it('concatenates text from multiple message outputs', () => {
+    const output = [
+      {
+        type: 'message' as const,
+        content: [{ type: 'output_text' as const, text: 'First message' }],
+      },
+      {
+        type: 'message' as const,
+        content: [{ type: 'output_text' as const, text: ' Second message' }],
+      },
+    ];
+    expect(extractTextFromResponsesOutput(output)).toBe('First message Second message');
+  });
+
+  it('returns empty string when no text content parts exist', () => {
+    const output = [
+      {
+        type: 'message' as const,
+        content: [],
+      },
+    ];
+    expect(extractTextFromResponsesOutput(output)).toBe('');
+  });
+
+  it('returns empty string for empty output array', () => {
+    expect(extractTextFromResponsesOutput([])).toBe('');
+  });
+
+  it('filters out non-message output types', () => {
+    const output = [
+      {
+        type: 'thinking' as unknown as 'message',
+        content: [{ type: 'output_text' as const, text: 'Should be ignored' }],
+      },
+      {
+        type: 'message' as const,
+        content: [{ type: 'output_text' as const, text: 'Should be included' }],
+      },
+    ];
+    expect(extractTextFromResponsesOutput(output)).toBe('Should be included');
+  });
+
+  it('filters out unknown content part types', () => {
+    const output = [
+      {
+        type: 'message' as const,
+        content: [
+          { type: 'refusal' as unknown as 'text', text: 'Ignored' },
+          { type: 'output_text' as const, text: 'Included' },
+        ],
+      },
+    ];
+    expect(extractTextFromResponsesOutput(output)).toBe('Included');
+  });
+
+  it('handles real xAI Responses API payload structure', () => {
+    const realApiResponse = {
+      output: [
+        {
+          type: 'message' as const,
+          content: [
+            {
+              type: 'output_text' as const,
+              text: '```json\n{"question": "Should Congress pass the infrastructure bill?", "options": [{"text": "Yes"}, {"text": "No"}]}\n```',
+            },
+          ],
+        },
+      ],
+    };
+    const extracted = extractTextFromResponsesOutput(realApiResponse.output);
+    expect(extracted).toContain('question');
+    expect(extracted).toContain('infrastructure bill');
+    expect(extracted.length).toBeGreaterThan(0);
   });
 });
