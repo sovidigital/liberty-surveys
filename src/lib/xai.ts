@@ -174,9 +174,14 @@ interface ResponsesRequest {
   }>;
 }
 
+interface ResponsesContentPart {
+  type: 'text' | 'output_text';
+  text: string;
+}
+
 interface ResponsesOutput {
   type: 'message';
-  content: Array<{ type: 'text'; text: string }>;
+  content: ResponsesContentPart[];
 }
 
 interface ResponsesResponse {
@@ -187,6 +192,19 @@ interface ResponsesResponse {
     output_tokens: number;
     reasoning_tokens?: number;
   };
+}
+
+/**
+ * Extract text content from xAI Responses API output.
+ * Handles both 'text' (legacy/undocumented) and 'output_text' (documented) content types.
+ */
+export function extractTextFromResponsesOutput(output: ResponsesOutput[]): string {
+  return output
+    .filter(o => o.type === 'message')
+    .flatMap(o => o.content)
+    .filter(c => c.type === 'text' || c.type === 'output_text')
+    .map(c => c.text)
+    .join('');
 }
 
 async function invokeXaiModel(
@@ -259,12 +277,7 @@ async function invokeXaiModel(
 
     const data: ResponsesResponse = await response.json();
 
-    const textContent = data.output
-      .filter(o => o.type === 'message')
-      .flatMap(o => o.content)
-      .filter(c => c.type === 'text')
-      .map(c => c.text)
-      .join('');
+    const textContent = extractTextFromResponsesOutput(data.output);
 
     return {
       text: textContent,
