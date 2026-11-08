@@ -30,6 +30,38 @@ const RECENT_TOPICS_DAYS = 7;
 
 const MAX_ARTICLES_FOR_SPEED = 50;
 
+// Generic political terms that appear in most poll questions and shouldn't alone
+// trigger topic similarity. These describe broad categories, not specific stories.
+// A cluster with topic "president" about a new tariff announcement shouldn't be
+// blocked just because a recent poll question contained the word "president".
+const GENERIC_POLITICAL_TERMS = new Set([
+  'president',
+  'house',
+  'white house',
+  'congress',
+  'senate',
+  'election',
+  'vote',
+  'administration',
+  'government',
+  'federal',
+  'law',
+  'bill',
+  'policy',
+  'decision',
+  'legislation',
+  'republican',
+  'democrat',
+  'gop',
+  'party',
+  'political',
+  'washington',
+  'capitol',
+  'lawmaker',
+  'official',
+  'leader',
+]);
+
 const DEFAULT_GENERATION_TIMEOUT_MS = 240000; // 4 minutes default for standalone Lambda (5min limit)
 const MIN_TIME_FOR_LLM_RETRY_MS = 30000; // Need at least 30s remaining to attempt another LLM call
 const MIN_TIME_FOR_FALLBACK_MS = 10000; // Reserve 10s for evergreen fallback
@@ -75,16 +107,65 @@ async function getRecentPollTopics(days: number = RECENT_TOPICS_DAYS): Promise<s
   }
 }
 
-function isTopicTooSimilarToRecent(topic: string, recentTopics: string[]): boolean {
-  const topicLower = topic.toLowerCase();
+/**
+ * Checks if a topic cluster is too similar to recently published polls.
+ * 
+ * Generic political terms (president, house, congress, etc.) are NEVER considered
+ * "too similar" on their own because:
+ * 1. They appear in nearly every political poll question
+ * 2. A single keyword can't distinguish between different stories (e.g., "house"
+ *    could mean a new vote, an investigation, a leadership change, etc.)
+ * 3. The LLM generates polls from specific articles, so even with the same topic
+ *    keyword, different days will produce different questions about different events
+ * 
+ * True duplicate prevention happens at the poll question level via the evergreen
+ * exclusion window and question-matching logic.
+ * 
+ * For specific multi-word or uncommon topics (e.g., "tariff", "impeachment trial"):
+ * Use stricter matching since these indicate more specific stories.
+ */
+export function isTopicTooSimilarToRecent(topic: string, recentTopics: string[]): boolean {
+  const topicLower = topic.toLowerCase().trim();
   
+  if (!topicLower || recentTopics.length === 0) {
+    return false;
+  }
+  
+  // Generic political terms are too broad to indicate "same story" - skip them entirely.
+  // A cluster with topic "president" about a trade announcement is different from
+  // a recent poll about the president's healthcare stance, even though both mention
+  // "president". Let the LLM's article-based generation produce distinct questions.
+  if (GENERIC_POLITICAL_TERMS.has(topicLower)) {
+    return false;
+  }
+  
+  // For specific (non-generic) terms, use stricter matching to catch actual
+  // topic overlap (e.g., back-to-back polls about "tariffs" or "student loans")
   for (const recent of recentTopics) {
-    if (recent.includes(topicLower) || topicLower.includes(recent.split(' ').slice(0, 3).join(' '))) {
+    const recentLower = recent.toLowerCase();
+    
+    // Similar if the specific topic appears as a word/phrase in the recent question
+    // Use word boundary matching to avoid false positives (e.g., "tax" matching "taxation")
+    const wordBoundaryPattern = new RegExp(`\\b${escapeRegex(topicLower)}\\b`);
+    if (wordBoundaryPattern.test(recentLower)) {
+      return true;
+    }
+    
+    // Check if topic is a multi-word phrase that appears in the question
+    // (handles cases like topic "student loan" matching "student loan forgiveness debate")
+    if (topicLower.includes(' ') && recentLower.includes(topicLower)) {
       return true;
     }
   }
   
   return false;
+}
+
+/**
+ * Escapes special regex characters in a string for safe use in RegExp constructor.
+ */
+function escapeRegex(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 async function selectBestTopic(
