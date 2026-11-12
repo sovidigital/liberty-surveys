@@ -143,18 +143,39 @@ export default function HomePage() {
               />
               <p className="text-sm">Making your voice heard, one poll at a time.</p>
             </div>
-            <div className="flex space-x-8">
+            <div className="flex flex-wrap justify-center md:justify-end gap-x-8 gap-y-2">
               <Link href="/polls" className="hover:text-white transition-colors">
                 Results
               </Link>
               <Link href="/archive" className="hover:text-white transition-colors">
                 Archive
               </Link>
-              <Link href="/privacy" className="hover:text-white transition-colors">
-                Privacy
-              </Link>
-              <Link href="/terms" className="hover:text-white transition-colors">
-                Terms
+              <a
+                href="https://www.dailytrendsmedia.com/privacy-policy/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="hover:text-white transition-colors"
+              >
+                Privacy Policy
+              </a>
+              <a
+                href="https://www.dailytrendsmedia.com/terms-of-service/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="hover:text-white transition-colors"
+              >
+                Terms of Use
+              </a>
+              <a
+                href="https://www.dailytrendsmedia.com/dont-sell/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="hover:text-white transition-colors"
+              >
+                Do Not Sell My Personal Information
+              </a>
+              <Link href="/sms-terms" className="hover:text-white transition-colors">
+                SMS Terms
               </Link>
             </div>
           </div>
