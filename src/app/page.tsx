@@ -172,7 +172,7 @@ export default function HomePage() {
                 rel="noopener noreferrer"
                 className="hover:text-white transition-colors"
               >
-                Do Not Sell My Personal Information
+                Do Not Sell
               </a>
               <Link href="/sms-terms" className="hover:text-white transition-colors">
                 SMS Terms

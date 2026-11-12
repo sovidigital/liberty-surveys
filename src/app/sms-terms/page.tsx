@@ -171,7 +171,7 @@ export default function SmsTermsPage() {
               rel="noopener noreferrer"
               className="hover:text-white transition-colors"
             >
-              Do Not Sell My Personal Information
+              Do Not Sell
             </a>
             <Link href="/sms-terms" className="text-white font-medium">
               SMS Terms
