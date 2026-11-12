@@ -113,7 +113,9 @@ export default function DailyEmailPreview() {
           <p>
             <a href="#" className="underline text-gray-300 hover:text-white">Unsubscribe</a>
             {' · '}
-            <a href="#" className="underline text-gray-300 hover:text-white">Privacy Policy</a>
+            <a href="https://www.dailytrendsmedia.com/privacy-policy/" target="_blank" rel="noopener noreferrer" className="underline text-gray-300 hover:text-white">Privacy Policy</a>
+            {' · '}
+            <a href="https://www.dailytrendsmedia.com/terms-of-service/" target="_blank" rel="noopener noreferrer" className="underline text-gray-300 hover:text-white">Terms of Use</a>
           </p>
         </div>
       </div>
