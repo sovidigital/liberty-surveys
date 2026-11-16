@@ -18,6 +18,7 @@ import {
   NewsArticle,
   GeneratedPoll,
   EvergreenPoll,
+  BiasCheckResult,
 } from '@/types';
 
 // ============================================================================
@@ -29,6 +30,16 @@ const MIN_ARTICLES_PER_TOPIC = 4;
 const RECENT_TOPICS_DAYS = 7;
 
 const MAX_ARTICLES_FOR_SPEED = 50;
+
+// Multi-topic fallback: try additional topics before going to evergreen
+export const MAX_TOPICS_TO_TRY = 3;
+
+// Near-pass thresholds: drafts scoring close to passing can be published
+// instead of using evergreen. A near-pass must have:
+// - overallScore >= NEAR_PASS_OVERALL_THRESHOLD (vs 0.7 for full pass)
+// - All individual scores >= NEAR_PASS_INDIVIDUAL_THRESHOLD (vs 0.5 for full pass)
+export const NEAR_PASS_OVERALL_THRESHOLD = 0.6;
+export const NEAR_PASS_INDIVIDUAL_THRESHOLD = 0.4;
 
 // Generic political terms that appear in most poll questions and shouldn't alone
 // trigger topic similarity. These describe broad categories, not specific stories.
@@ -87,6 +98,46 @@ function hasTimeForLlmRetry(startTime: number): boolean {
 
 function hasTimeForFallback(startTime: number): boolean {
   return getTimeRemainingMs(startTime) >= MIN_TIME_FOR_FALLBACK_MS;
+}
+
+// ============================================================================
+// Near-Pass Detection
+// ============================================================================
+
+interface NearPassDraft {
+  poll: GeneratedPoll;
+  biasResult: BiasCheckResult;
+  topic: string;
+  promptHash: string;
+  rawInput: string;
+  rawOutput: string;
+}
+
+/**
+ * Checks if a bias check result qualifies as a "near-pass".
+ * A near-pass is close enough to passing that it's preferable to using
+ * an evergreen fallback poll, as it's still based on current news.
+ * 
+ * Near-pass criteria:
+ * - overallScore >= 0.6 (10 points below the 0.7 pass threshold)
+ * - All individual scores >= 0.4 (10 points below the 0.5 individual thresholds)
+ */
+export function isNearPass(biasResult: BiasCheckResult): boolean {
+  return (
+    biasResult.overallScore >= NEAR_PASS_OVERALL_THRESHOLD &&
+    biasResult.questionBiasScore >= NEAR_PASS_INDIVIDUAL_THRESHOLD &&
+    biasResult.optionBalanceScore >= NEAR_PASS_INDIVIDUAL_THRESHOLD &&
+    biasResult.perspectiveBalanceScore >= NEAR_PASS_INDIVIDUAL_THRESHOLD
+  );
+}
+
+/**
+ * Compares two bias results to determine which is better.
+ * Returns true if `a` is better than `b`.
+ */
+function isBetterBiasResult(a: BiasCheckResult, b: BiasCheckResult | null): boolean {
+  if (!b) return true;
+  return a.overallScore > b.overallScore;
 }
 
 // ============================================================================
@@ -168,11 +219,25 @@ function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-async function selectBestTopic(
+interface TopicCandidate {
+  topic: TopicCluster;
+  reason: string;
+}
+
+/**
+ * Selects all suitable topic candidates from clusters, ordered by score.
+ * Each candidate passes the minimum requirements for poll generation.
+ */
+function selectCandidateTopics(
   clusters: TopicCluster[],
-  recentTopics: string[]
-): Promise<{ topic: TopicCluster; reason: string } | null> {
+  recentTopics: string[],
+  maxCandidates: number = MAX_TOPICS_TO_TRY
+): TopicCandidate[] {
+  const candidates: TopicCandidate[] = [];
+  
   for (const cluster of clusters) {
+    if (candidates.length >= maxCandidates) break;
+    
     if (cluster.articles.length < MIN_ARTICLES_PER_TOPIC) {
       continue;
     }
@@ -189,10 +254,18 @@ async function selectBestTopic(
     
     const reason = `Selected "${cluster.topic}" with ${cluster.articles.length} articles from ${cluster.coverageBreadth} political perspectives. Prominence: ${cluster.prominenceScore}, Debatability: ${cluster.debatabilityScore}`;
     
-    return { topic: cluster, reason };
+    candidates.push({ topic: cluster, reason });
   }
   
-  return null;
+  return candidates;
+}
+
+async function selectBestTopic(
+  clusters: TopicCluster[],
+  recentTopics: string[]
+): Promise<{ topic: TopicCluster; reason: string } | null> {
+  const candidates = selectCandidateTopics(clusters, recentTopics, 1);
+  return candidates.length > 0 ? candidates[0] : null;
 }
 
 // ============================================================================
@@ -494,14 +567,16 @@ export async function runPollGeneration(): Promise<GenerationResult> {
   
   console.log(`[GENERATOR] Starting generation run ${runId} for ${runDate.toISOString()}`);
   console.log(`[GENERATOR] Timeout limit: ${getGenerationTimeoutMs()}ms`);
+  console.log(`[GENERATOR] Multi-topic fallback enabled: up to ${MAX_TOPICS_TO_TRY} topics, near-pass threshold: ${NEAR_PASS_OVERALL_THRESHOLD}`);
   
-  let retryCount = 0;
+  let totalRetryCount = 0;
   let lastError: string | undefined;
+  let bestNearPassDraft: NearPassDraft | null = null;
+  const topicsAttempted: string[] = [];
   
   try {
     await updateGenerationRun(runId, { status: 'fetching_news' as const });
     
-    // Fetch fewer articles for speed - we only need enough for topic clustering and LLM context
     console.log('[GENERATOR] Fetching news articles...');
     const articles = await fetchNews({ maxArticles: MAX_ARTICLES_FOR_SPEED });
     
@@ -514,7 +589,6 @@ export async function runPollGeneration(): Promise<GenerationResult> {
     
     console.log(`[GENERATOR] Successfully fetched ${articles.length} news articles`);
     
-    // Log source distribution for diagnostics
     const sourceCounts = articles.reduce((acc, a) => {
       acc[a.source.politicalLean] = (acc[a.source.politicalLean] || 0) + 1;
       return acc;
@@ -526,7 +600,6 @@ export async function runPollGeneration(): Promise<GenerationResult> {
       news_sources_queried: 'NewsAPI,RSS',
     });
     
-    // Save articles in batches for audit trail (non-blocking if we timeout later)
     await saveFetchedArticles(runId, articles);
     
     checkTimeout(startTime, 'after article save');
@@ -546,10 +619,10 @@ export async function runPollGeneration(): Promise<GenerationResult> {
       recent_topics_avoided: recentTopics.slice(0, 5).join('; '),
     });
     
-    const topicSelection = await selectBestTopic(clusters, recentTopics);
+    const candidateTopics = selectCandidateTopics(clusters, recentTopics, MAX_TOPICS_TO_TRY);
     
-    if (!topicSelection) {
-      console.error('[GENERATOR] No suitable topic found from clusters');
+    if (candidateTopics.length === 0) {
+      console.error('[GENERATOR] No suitable topics found from clusters');
       console.error(`[GENERATOR] Cluster count: ${clusters.length}`);
       console.error(`[GENERATOR] Recent topics to avoid: ${recentTopics.length}`);
       if (clusters.length > 0) {
@@ -562,159 +635,250 @@ export async function runPollGeneration(): Promise<GenerationResult> {
       throw new Error(`No suitable topic found - ${clusters.length} clusters evaluated, ${recentTopics.length} recent topics excluded`);
     }
     
-    const { topic: selectedCluster, reason: topicReason } = topicSelection;
+    console.log(`[GENERATOR] Found ${candidateTopics.length} candidate topics: ${candidateTopics.map(c => c.topic.topic).join(', ')}`);
     
-    console.log(`[GENERATOR] Selected topic: ${selectedCluster.topic}`);
-    
-    await updateGenerationRun(runId, {
-      selected_topic: selectedCluster.topic,
-      topic_reason: topicReason,
-    });
-    
-    const topicArticles = await fetchArticlesForTopic(
-      selectedCluster.topic,
-      articles,
-      12
-    );
-    
-    await updateGenerationRun(runId, {
-      articles_used_count: topicArticles.length,
-    });
-    
-checkTimeout(startTime, 'before LLM generation');
-    
-    let llmTimedOut = false;
     const llmTimeout = getLlmTimeoutMs();
-    
     console.log(`[GENERATOR] Starting LLM generation with timeout=${llmTimeout}ms, pipeline limit=${getGenerationTimeoutMs()}ms`);
     
-    while (retryCount < MAX_RETRIES) {
+    // Try each candidate topic until one passes or we exhaust all options
+    for (let topicIndex = 0; topicIndex < candidateTopics.length; topicIndex++) {
+      const { topic: selectedCluster, reason: topicReason } = candidateTopics[topicIndex];
+      
       if (!hasTimeForLlmRetry(startTime)) {
         const remaining = getTimeRemainingMs(startTime);
-        console.log(`[GENERATOR] Only ${remaining}ms remaining (need ${MIN_TIME_FOR_LLM_RETRY_MS}ms), bailing to fallback`);
-        lastError = `Insufficient time for retry after ${retryCount} attempts (${remaining}ms remaining)`;
+        console.log(`[GENERATOR] Only ${remaining}ms remaining (need ${MIN_TIME_FOR_LLM_RETRY_MS}ms), stopping topic iteration`);
+        lastError = `Insufficient time to try topic ${topicIndex + 1} (${remaining}ms remaining)`;
         break;
       }
       
-      try {
-        await updateGenerationRun(runId, { 
-          status: 'generating' as const,
-          retry_count: retryCount,
-        });
-        
-        console.log(`[GENERATOR] Attempt ${retryCount + 1}/${MAX_RETRIES}, ${getTimeRemainingMs(startTime)}ms remaining`);
-        
-        const { poll: generatedPoll, promptHash, rawInput, rawOutput } = await generatePoll(
-          selectedCluster.topic,
-          topicArticles
-        );
-        
-        checkTimeout(startTime, 'after poll generation');
-        
-        await updateGenerationRun(runId, {
-          model_used: getModelId(),
-          generation_prompt_hash: promptHash,
-          raw_llm_input: rawInput,
-          raw_llm_output: rawOutput,
-        });
-        
-        await updateGenerationRun(runId, { status: 'validating' as const });
-        
-        const citationResult = validateCitations(generatedPoll, topicArticles);
-        
-        await updateGenerationRun(runId, {
-          citation_validity_score: citationResult.score,
-        });
-        
-        if (!citationResult.valid) {
-          console.warn(`[GENERATOR] Invalid citations: ${citationResult.invalidSources.join(', ')}`);
-          if (citationResult.score < 0.5) {
-            throw new Error(`Citation validation failed: ${citationResult.invalidSources.length} invalid sources`);
-          }
-        }
-        
-        const biasResult = await checkPollBias(generatedPoll);
-        
-        checkTimeout(startTime, 'after bias check');
-        
-        await updateGenerationRun(runId, {
-          bias_score: biasResult.questionBiasScore,
-          balance_score: biasResult.overallScore,
-          bias_check_output: JSON.stringify(biasResult),
-        });
-        
-        if (!biasResult.passesThreshold) {
-          throw new Error(`Bias check failed: ${biasResult.issues.join(', ')}`);
-        }
-        
-        const pollId = await createPollFromGenerated(generatedPoll, runId, true);
-        
-        await updateGenerationRun(runId, {
-          status: 'success' as const,
-          generated_poll_id: pollId,
-          completed_at: new Date(),
-        });
-        
-        console.log(`[GENERATOR] Successfully generated poll ${pollId}`);
-        
-        return {
-          success: true,
-          poll: generatedPoll,
-          biasCheck: biasResult,
-          runId,
-        };
-        
-      } catch (error) {
-        retryCount++;
-        const isTimeout = error instanceof LlmTimeoutError;
-        const isEmptyResponse = error instanceof EmptyLlmResponseError;
-        const isJsonError = error instanceof JsonExtractionError;
-        const isRetryable = isEmptyResponse || isJsonError;
-        lastError = error instanceof Error ? error.message : String(error);
-        
-        if (isTimeout) {
-          llmTimedOut = true;
-          console.error(`[GENERATOR] LLM timeout on attempt ${retryCount}:`, lastError);
-        } else if (isEmptyResponse) {
-          console.error(`[GENERATOR] Empty LLM response on attempt ${retryCount}`);
-        } else if (isJsonError) {
-          console.error(`[GENERATOR] JSON extraction failed on attempt ${retryCount}:`, lastError);
-          if (error instanceof JsonExtractionError) {
-            console.error(`[GENERATOR] Raw response preview:`, error.rawResponse);
-          }
-        } else {
-          console.error(`[GENERATOR] Attempt ${retryCount} failed:`, lastError);
-        }
-        
-        await updateGenerationRun(runId, {
-          retry_count: retryCount,
-          error_message: lastError,
-        });
-        
-        if (retryCount >= MAX_RETRIES) {
-          console.log(`[GENERATOR] Max retries (${MAX_RETRIES}) reached`);
+      topicsAttempted.push(selectedCluster.topic);
+      console.log(`[GENERATOR] Trying topic ${topicIndex + 1}/${candidateTopics.length}: "${selectedCluster.topic}"`);
+      
+      await updateGenerationRun(runId, {
+        selected_topic: selectedCluster.topic,
+        topic_reason: topicReason,
+      });
+      
+      const topicArticles = await fetchArticlesForTopic(
+        selectedCluster.topic,
+        articles,
+        12
+      );
+      
+      await updateGenerationRun(runId, {
+        articles_used_count: topicArticles.length,
+      });
+      
+      checkTimeout(startTime, `before LLM generation for topic ${topicIndex + 1}`);
+      
+      let topicRetryCount = 0;
+      let topicPassed = false;
+      
+      while (topicRetryCount < MAX_RETRIES) {
+        if (!hasTimeForLlmRetry(startTime)) {
+          const remaining = getTimeRemainingMs(startTime);
+          console.log(`[GENERATOR] Only ${remaining}ms remaining (need ${MIN_TIME_FOR_LLM_RETRY_MS}ms), stopping retries for topic "${selectedCluster.topic}"`);
+          lastError = `Insufficient time for retry after ${topicRetryCount} attempts on topic "${selectedCluster.topic}" (${remaining}ms remaining)`;
           break;
         }
         
-        if (isTimeout) {
-          if (hasTimeForLlmRetry(startTime)) {
-            console.log(`[GENERATOR] LLM timed out but time remains (${getTimeRemainingMs(startTime)}ms), will retry`);
+        try {
+          await updateGenerationRun(runId, { 
+            status: 'generating' as const,
+            retry_count: totalRetryCount,
+          });
+          
+          console.log(`[GENERATOR] Topic "${selectedCluster.topic}" attempt ${topicRetryCount + 1}/${MAX_RETRIES}, ${getTimeRemainingMs(startTime)}ms remaining`);
+          
+          const { poll: generatedPoll, promptHash, rawInput, rawOutput } = await generatePoll(
+            selectedCluster.topic,
+            topicArticles
+          );
+          
+          checkTimeout(startTime, 'after poll generation');
+          
+          await updateGenerationRun(runId, {
+            model_used: getModelId(),
+            generation_prompt_hash: promptHash,
+            raw_llm_input: rawInput,
+            raw_llm_output: rawOutput,
+          });
+          
+          await updateGenerationRun(runId, { status: 'validating' as const });
+          
+          const citationResult = validateCitations(generatedPoll, topicArticles);
+          
+          await updateGenerationRun(runId, {
+            citation_validity_score: citationResult.score,
+          });
+          
+          if (!citationResult.valid) {
+            console.warn(`[GENERATOR] Invalid citations: ${citationResult.invalidSources.join(', ')}`);
+            if (citationResult.score < 0.5) {
+              throw new Error(`Citation validation failed: ${citationResult.invalidSources.length} invalid sources`);
+            }
+          }
+          
+          const biasResult = await checkPollBias(generatedPoll);
+          
+          checkTimeout(startTime, 'after bias check');
+          
+          await updateGenerationRun(runId, {
+            bias_score: biasResult.questionBiasScore,
+            balance_score: biasResult.overallScore,
+            bias_check_output: JSON.stringify(biasResult),
+          });
+          
+          if (biasResult.passesThreshold) {
+            const pollId = await createPollFromGenerated(generatedPoll, runId, true);
+            
+            const successReason = topicsAttempted.length > 1
+              ? `Successfully generated poll on topic ${topicsAttempted.length} ("${selectedCluster.topic}") after topics [${topicsAttempted.slice(0, -1).join(', ')}] failed bias checks.`
+              : undefined;
+            
+            await updateGenerationRun(runId, {
+              status: 'success' as const,
+              generated_poll_id: pollId,
+              completed_at: new Date(),
+              fallback_reason: successReason,
+            });
+            
+            console.log(`[GENERATOR] Successfully generated poll ${pollId} for topic "${selectedCluster.topic}"`);
+            if (topicsAttempted.length > 1) {
+              console.log(`[GENERATOR] Note: This was topic ${topicsAttempted.length} after earlier topics failed bias checks`);
+            }
+            
+            return {
+              success: true,
+              poll: generatedPoll,
+              biasCheck: biasResult,
+              runId,
+            };
+          }
+          
+          // Bias check failed - check if this is a near-pass
+          console.log(`[GENERATOR] Bias check failed for topic "${selectedCluster.topic}": ${biasResult.issues.join(', ')}`);
+          console.log(`[GENERATOR] Scores: overall=${biasResult.overallScore.toFixed(2)}, question=${biasResult.questionBiasScore.toFixed(2)}, options=${biasResult.optionBalanceScore.toFixed(2)}, perspectives=${biasResult.perspectiveBalanceScore.toFixed(2)}`);
+          
+          if (isNearPass(biasResult) && isBetterBiasResult(biasResult, bestNearPassDraft?.biasResult || null)) {
+            console.log(`[GENERATOR] Recording as best near-pass draft (overall score: ${biasResult.overallScore.toFixed(2)})`);
+            bestNearPassDraft = {
+              poll: generatedPoll,
+              biasResult,
+              topic: selectedCluster.topic,
+              promptHash,
+              rawInput,
+              rawOutput,
+            };
+          }
+          
+          lastError = `Bias check failed: ${biasResult.issues.join(', ')}`;
+          topicRetryCount++;
+          totalRetryCount++;
+          
+          await updateGenerationRun(runId, {
+            retry_count: totalRetryCount,
+            error_message: lastError,
+          });
+          
+          if (topicRetryCount >= MAX_RETRIES) {
+            console.log(`[GENERATOR] Max retries (${MAX_RETRIES}) reached for topic "${selectedCluster.topic}"`);
+            break;
+          }
+          
+        } catch (error) {
+          topicRetryCount++;
+          totalRetryCount++;
+          const isTimeout = error instanceof LlmTimeoutError;
+          const isEmptyResponse = error instanceof EmptyLlmResponseError;
+          const isJsonError = error instanceof JsonExtractionError;
+          const isRetryable = isEmptyResponse || isJsonError;
+          lastError = error instanceof Error ? error.message : String(error);
+          
+          if (isTimeout) {
+            console.error(`[GENERATOR] LLM timeout on topic "${selectedCluster.topic}" attempt ${topicRetryCount}:`, lastError);
+          } else if (isEmptyResponse) {
+            console.error(`[GENERATOR] Empty LLM response on topic "${selectedCluster.topic}" attempt ${topicRetryCount}`);
+          } else if (isJsonError) {
+            console.error(`[GENERATOR] JSON extraction failed on topic "${selectedCluster.topic}" attempt ${topicRetryCount}:`, lastError);
+            if (error instanceof JsonExtractionError) {
+              console.error(`[GENERATOR] Raw response preview:`, error.rawResponse);
+            }
+          } else {
+            console.error(`[GENERATOR] Topic "${selectedCluster.topic}" attempt ${topicRetryCount} failed:`, lastError);
+          }
+          
+          await updateGenerationRun(runId, {
+            retry_count: totalRetryCount,
+            error_message: lastError,
+          });
+          
+          if (topicRetryCount >= MAX_RETRIES) {
+            console.log(`[GENERATOR] Max retries (${MAX_RETRIES}) reached for topic "${selectedCluster.topic}"`);
+            break;
+          }
+          
+          if (isTimeout) {
+            if (hasTimeForLlmRetry(startTime)) {
+              console.log(`[GENERATOR] LLM timed out but time remains (${getTimeRemainingMs(startTime)}ms), will retry`);
+              continue;
+            }
+            console.log('[GENERATOR] LLM timed out and insufficient time for retry');
+            break;
+          }
+          
+          if (isRetryable && hasTimeForLlmRetry(startTime)) {
+            console.log(`[GENERATOR] Retrying after recoverable error (${getTimeRemainingMs(startTime)}ms remaining)`);
             continue;
           }
-          console.log('[GENERATOR] LLM timed out and insufficient time for retry, falling through to evergreen');
-          break;
         }
-        
-        if (isRetryable && hasTimeForLlmRetry(startTime)) {
-          console.log(`[GENERATOR] Retrying after recoverable error (${getTimeRemainingMs(startTime)}ms remaining)`);
-          continue;
-        }
+      }
+      
+      if (topicPassed) break;
+      
+      // Topic exhausted its retries, try next topic
+      if (topicIndex < candidateTopics.length - 1) {
+        console.log(`[GENERATOR] Topic "${selectedCluster.topic}" exhausted retries, moving to next candidate topic`);
       }
     }
     
-    const fallbackReasonPrefix = llmTimedOut 
-      ? 'LLM call timed out' 
-      : `Generation failed after ${retryCount} attempts`;
+    // All topics exhausted - check if we have a near-pass draft
+    if (bestNearPassDraft) {
+      console.log(`[GENERATOR] No topic passed cleanly, but found a near-pass draft from topic "${bestNearPassDraft.topic}"`);
+      console.log(`[GENERATOR] Near-pass scores: overall=${bestNearPassDraft.biasResult.overallScore.toFixed(2)}, question=${bestNearPassDraft.biasResult.questionBiasScore.toFixed(2)}, options=${bestNearPassDraft.biasResult.optionBalanceScore.toFixed(2)}, perspectives=${bestNearPassDraft.biasResult.perspectiveBalanceScore.toFixed(2)}`);
+      
+      const pollId = await createPollFromGenerated(bestNearPassDraft.poll, runId, true);
+      
+      const nearPassReason = `All ${topicsAttempted.length} topic(s) [${topicsAttempted.join(', ')}] failed full bias check. Published near-pass draft from topic "${bestNearPassDraft.topic}" with overall score ${bestNearPassDraft.biasResult.overallScore.toFixed(2)} (threshold: 0.7, near-pass threshold: ${NEAR_PASS_OVERALL_THRESHOLD}). Issues: ${bestNearPassDraft.biasResult.issues.join('; ') || 'none flagged'}.`;
+      
+      await updateGenerationRun(runId, {
+        status: 'success' as const,
+        generated_poll_id: pollId,
+        selected_topic: bestNearPassDraft.topic,
+        bias_score: bestNearPassDraft.biasResult.questionBiasScore,
+        balance_score: bestNearPassDraft.biasResult.overallScore,
+        bias_check_output: JSON.stringify(bestNearPassDraft.biasResult),
+        generation_prompt_hash: bestNearPassDraft.promptHash,
+        raw_llm_input: bestNearPassDraft.rawInput,
+        raw_llm_output: bestNearPassDraft.rawOutput,
+        used_fallback: true,
+        fallback_reason: nearPassReason,
+        completed_at: new Date(),
+      });
+      
+      console.log(`[GENERATOR] Published near-pass poll ${pollId} from topic "${bestNearPassDraft.topic}"`);
+      
+      return {
+        success: true,
+        poll: bestNearPassDraft.poll,
+        biasCheck: bestNearPassDraft.biasResult,
+        runId,
+        usedFallback: true,
+      };
+    }
+    
+    // No near-pass available - fall back to evergreen
+    const fallbackReasonPrefix = `All ${topicsAttempted.length} topic(s) [${topicsAttempted.join(', ')}] failed bias checks with no near-pass candidates (scores below ${NEAR_PASS_OVERALL_THRESHOLD})`;
     console.log(`[GENERATOR] ${fallbackReasonPrefix}, using evergreen fallback`);
     console.log(`[GENERATOR] Last error: ${lastError}`);
     
@@ -728,11 +892,11 @@ checkTimeout(startTime, 'before LLM generation');
         status: 'fallback' as const,
         generated_poll_id: pollId,
         used_fallback: true,
-        fallback_reason: `${fallbackReasonPrefix}: ${lastError}. Using evergreen poll.`,
+        fallback_reason: `${fallbackReasonPrefix}. Last error: ${lastError}. Using evergreen poll.`,
         completed_at: new Date(),
       });
       
-      console.log(`[GENERATOR] Used fallback poll ${pollId}`);
+      console.log(`[GENERATOR] Used evergreen fallback poll ${pollId}`);
       
       return {
         success: true,
@@ -744,7 +908,7 @@ checkTimeout(startTime, 'before LLM generation');
     
     await updateGenerationRun(runId, {
       status: 'failed' as const,
-      error_message: `All attempts failed and no fallback available: ${lastError}`,
+      error_message: `All topics failed and no fallback available: ${lastError}`,
       completed_at: new Date(),
     });
     
@@ -760,8 +924,39 @@ checkTimeout(startTime, 'before LLM generation');
     
     console.error('[GENERATOR] Generation error:', errorMessage);
     
-    // On timeout or critical errors, try evergreen fallback before giving up
+    // On timeout or critical errors, check for near-pass first, then try evergreen
     if (isTimeout || errorMessage.includes('No news articles') || errorMessage.includes('No suitable topic')) {
+      // If we have a near-pass draft from before the error, use it
+      if (bestNearPassDraft) {
+        console.log(`[GENERATOR] Error occurred but have near-pass draft from topic "${bestNearPassDraft.topic}", using it`);
+        
+        const pollId = await createPollFromGenerated(bestNearPassDraft.poll, runId, true);
+        
+        const nearPassReason = `Error during generation: ${errorMessage}. Published near-pass draft from topic "${bestNearPassDraft.topic}" with overall score ${bestNearPassDraft.biasResult.overallScore.toFixed(2)}.`;
+        
+        await updateGenerationRun(runId, {
+          status: 'success' as const,
+          generated_poll_id: pollId,
+          selected_topic: bestNearPassDraft.topic,
+          bias_score: bestNearPassDraft.biasResult.questionBiasScore,
+          balance_score: bestNearPassDraft.biasResult.overallScore,
+          bias_check_output: JSON.stringify(bestNearPassDraft.biasResult),
+          used_fallback: true,
+          fallback_reason: nearPassReason,
+          completed_at: new Date(),
+        });
+        
+        console.log(`[GENERATOR] Published near-pass poll ${pollId} after error`);
+        
+        return {
+          success: true,
+          poll: bestNearPassDraft.poll,
+          biasCheck: bestNearPassDraft.biasResult,
+          runId,
+          usedFallback: true,
+        };
+      }
+      
       console.log('[GENERATOR] Attempting evergreen fallback after error...');
       
       const evergreen = await getEvergreenFallback();
